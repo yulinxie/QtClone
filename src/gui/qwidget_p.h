@@ -141,6 +141,10 @@ public:
     bool trackingLeave;
     QPoint lastMousePos;
     Qt::MouseButtons lastButtons;
+    bool clickDebug;
+    int debugClicks;
+    QPoint debugPos;
+    QString debugTarget;
     QString windowClass;
     ulong style;
     ulong exStyle;

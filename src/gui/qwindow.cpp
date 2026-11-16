@@ -49,7 +49,7 @@ QWidgetWindow* QWidgetWindow::fromHwnd(HWND hwnd) {
 QWidgetWindow::QWidgetWindow(QWidget* w)
     : hwnd(0), widget(w), hover(0), grabber(0), focus(0), defaultWidget(0),
       visible(false), inPaint(false), popup(false), trackingLeave(false),
-      lastButtons(Qt::NoButton), style(0), exStyle(0) {}
+      lastButtons(Qt::NoButton), clickDebug(false), debugClicks(0), style(0), exStyle(0) {}
 
 QWidgetWindow::~QWidgetWindow() {
     if (hwnd) destroy();
@@ -59,6 +59,11 @@ QWidgetWindow::~QWidgetWindow() {
 // window creation
 // ---------------------------------------------------------------------------
 bool QWidgetWindow::create() {
+    {
+        wchar_t dbg[16] = {0};
+        DWORD n = GetEnvironmentVariableW(L"QTCLONE_CLICK_DEBUG", dbg, 16);
+        clickDebug = n > 0 && dbg[0] != L'0';
+    }
     if (!widget) return false;
     if (!g_classRegistered) {
         WNDCLASSEXW wc;
@@ -205,6 +210,7 @@ void QWidgetWindow::paint(HDC targetDc) {
     QRect client(0, 0, widget->width(), widget->height());
     if (dirty.isEmpty()) dirty.unite(client);
     QRect bbox = dirty.boundingRect().intersected(client);
+    if (clickDebug) bbox = client;
     if (bbox.isEmpty()) return;
 
     if (back.isNull() || back.width() != widget->width() || back.height() != widget->height())
@@ -215,6 +221,14 @@ void QWidgetWindow::paint(HDC targetDc) {
         QPainter p(&back);
         p.setClipRect(bbox);
         widget->renderInternal(&p, QPoint(0, 0), bbox);
+    }
+
+    if (clickDebug && debugClicks > 0) {
+        QPainter dbg(&back);
+        dbg.setPen(QPen(QColor(0xFF, 0x00, 0x00), 2));
+        dbg.drawLine(debugPos.x() - 16, debugPos.y(), debugPos.x() + 16, debugPos.y());
+        dbg.drawLine(debugPos.x(), debugPos.y() - 16, debugPos.x(), debugPos.y() + 16);
+
     }
 
     HDC dc = targetDc;
@@ -351,6 +365,21 @@ void QWidgetWindow::handleMouse(QEvent::Type type, const QPoint& clientPos,
     }
 
     if (type == QEvent::MouseButtonPress) {
+        if (clickDebug) {
+            debugClicks++;
+            debugPos = clientPos;
+            debugTarget = target ? QString(target->className()) : QString(L"-");
+            wchar_t tmpPath[MAX_PATH] = {0};
+            GetTempPathW(MAX_PATH, tmpPath);
+            lstrcatW(tmpPath, L"qtclone-clicks.log");
+            FILE* log = _wfopen(tmpPath, L"a");
+            if (log) {
+                fprintf(log, "press %d,%d target=%s\n", clientPos.x(), clientPos.y(),
+                        debugTarget.toUtf8().c_str());
+                fclose(log);
+            }
+            updateAll();
+        }
         if (popup && !QRect(0, 0, widget->width(), widget->height()).contains(clientPos)) {
             widget->hide();
             return;

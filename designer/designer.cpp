@@ -243,6 +243,7 @@ QWidget* buildWidgetTree(QXmlNode* node, QWidget* parent) {
     QWidget* widget = QWidgetFactory::create(className.toUtf8().c_str());
     if (!widget) return 0;
     widget->setParentWidget(parent);
+    widget->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     widget->setObjectName(node->attribute(L"name"));
     // geometry is applied explicitly: it drives the absolute layout on the canvas
     QList<QXmlNode*> props = node->childrenNamed(L"property");
@@ -406,6 +407,7 @@ DesignerCanvas::DesignerCanvas(DesignerDocument* doc)
     form_->setObjectName(doc_->formClass());
     form_->setGeometry(QRect(20, 20, 640, 480));
     form_->setObjectName(doc_->formClass());
+    form_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     form_->show();
     rebuild();
 }
@@ -867,6 +869,58 @@ bool PropertyEditor::editValue(QWidget* widget, QMetaProperty prop) {
 }
 
 // ---------------------------------------------------------------------------
+// ToolboxTree : drag a widget class onto the canvas
+// ---------------------------------------------------------------------------
+class ToolboxTree : public QTreeWidget {
+public:
+    ToolboxTree() : dragActive_(false) {}
+
+    Signal<void(const QString&, const QPoint&)> itemDropped;
+
+protected:
+    void mousePressEvent(QMouseEvent* event) {
+        QTreeWidget::mousePressEvent(event);
+        if (event->button() != Qt::LeftButton) return;
+        dragActive_ = false;
+        dragStart_ = event->pos();
+        dragClass_ = classNameOf(currentItem());
+    }
+
+    void mouseMoveEvent(QMouseEvent* event) {
+        if (!(event->buttons() & Qt::LeftButton) || dragClass_.isEmpty()) return;
+        int dx = event->pos().x() - dragStart_.x();
+        int dy = event->pos().y() - dragStart_.y();
+        if (!dragActive_ && (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) > 6) {
+            dragActive_ = true;
+            setCursor(QCursor(Qt::ClosedHandCursor));
+        }
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) {
+        if (dragActive_) {
+            dragActive_ = false;
+            setCursor(QCursor(Qt::ArrowCursor));
+            QString cls = dragClass_;
+            dragClass_.clear();
+            if (!cls.isEmpty()) itemDropped(cls, event->globalPos());
+            return;
+        }
+        QTreeWidget::mouseReleaseEvent(event);
+    }
+
+private:
+    static QString classNameOf(QTreeWidgetItem* item) {
+        if (!item) return QString();
+        QVariant data = item->data(0, Qt::UserRole);
+        return data.isValid() ? data.toString() : QString();
+    }
+
+    bool dragActive_;
+    QPoint dragStart_;
+    QString dragClass_;
+};
+
+// ---------------------------------------------------------------------------
 // DesignerWindow
 // ---------------------------------------------------------------------------
 class DesignerWindow : public QMainWindow {
@@ -913,13 +967,15 @@ private:
     void onAbout();
     void onQuit();
     void onToolboxActivated(QTreeWidgetItem* item, int column);
+    void onToolboxDropped(const QString& className, const QPoint& globalPos);
+    QWidget* addWidgetAt(const QString& className, const QPoint& formPos);
     void onTreeClicked(QTreeWidgetItem* item, int column);
     void onPropertyChanged(QWidget* widget, const char* name, const QVariant& value);
 
     DesignerDocument doc_;
     DesignerCanvas* canvas_;
     QTreeWidget* tree_;
-    QTreeWidget* toolbox_;
+    ToolboxTree* toolbox_;
     PropertyEditor* properties_;
     QStatusBar* status_;
     bool updatingInspector_;
@@ -1010,7 +1066,7 @@ void DesignerWindow::buildMenus() {
 void DesignerWindow::buildUi() {
     QSplitter* main = new QSplitter(Qt::Horizontal);
 
-    toolbox_ = new QTreeWidget();
+    toolbox_ = new ToolboxTree();
     toolbox_->setHeaderLabels(QStringList() << L"工具箱");
     QList<QWidgetClassInfo> classes = QWidgetFactory::classes();
     QStringList groups;
@@ -1030,6 +1086,7 @@ void DesignerWindow::buildUi() {
         toolbox_->addTopLevelItem(groupItem);
     }
     QObject::connect(toolbox_, toolbox_->itemDoubleClicked, this, &DesignerWindow::onToolboxActivated);
+    toolbox_->itemDropped.connect(toolbox_, this, &DesignerWindow::onToolboxDropped);
 
     canvas_ = new DesignerCanvas(&doc_);
     canvas_->selectionChanged.connect(this, this, &DesignerWindow::onSelectionChanged);
@@ -1206,6 +1263,37 @@ void DesignerWindow::onToolboxActivated(QTreeWidgetItem* item, int) {
     addWidgetByClass(data.toString());
 }
 
+void DesignerWindow::onToolboxDropped(const QString& className, const QPoint& globalPos) {
+    QPoint canvasPos = canvas_->mapFromGlobal(globalPos);
+    QPoint formPos = canvasPos - canvas_->form()->pos();
+    addWidgetAt(className, formPos);
+}
+
+QWidget* DesignerWindow::addWidgetAt(const QString& className, const QPoint& formPos) {
+    QWidget* base = canvas_->form();
+    QWidget* widget = QWidgetFactory::create(className.toUtf8().c_str());
+    if (!widget) return 0;
+    widget->setParentWidget(base);
+    widget->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    widget->setObjectName(uniqueName(base, className.toLower()));
+    widget->resize(widget->sizeHint());
+    QSize size = widget->size();
+    int x = formPos.x() - size.width() / 2;
+    int y = formPos.y() - size.height() / 2;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x + size.width() > base->width()) x = qMax(0, base->width() - size.width());
+    if (y + size.height() > base->height()) y = qMax(0, base->height() - size.height());
+    widget->move(QPoint(x, y));
+    widget->show();
+    canvas_->select(widget);
+    canvas_->captureToDocument();
+    refreshInspector();
+    refreshProperties();
+    setStatus(L"已添加 " + className + L" (" + widget->objectName() + L")");
+    return widget;
+}
+
 void DesignerWindow::addWidgetByClass(const QString& className) {
     QWidget* base = canvas_->form();
     QWidget* parent = canvas_->selected();
@@ -1213,6 +1301,7 @@ void DesignerWindow::addWidgetByClass(const QString& className) {
     QWidget* widget = QWidgetFactory::create(className.toUtf8().c_str());
     if (!widget) return;
     widget->setParentWidget(parent);
+    widget->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     widget->setObjectName(uniqueName(base, className.toLower()));
     widget->resize(widget->sizeHint());
     QPoint offset(24, 24);

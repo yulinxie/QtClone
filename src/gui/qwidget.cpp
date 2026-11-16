@@ -218,6 +218,13 @@ QWidget::~QWidget() {
     if (d_->ownerWindow) {
         if (d_->ownerWindow->hover == this) d_->ownerWindow->hover = 0;
     }
+    // Widget children live in QWidgetPrivate::children, not in QObject's
+    // child list, so they have to be deleted explicitly.
+    while (!d_->children.isEmpty()) {
+        QWidget* child = d_->children.takeLast();
+        child->d_func()->parent = 0;
+        delete child;
+    }
     // Null the pointer before deleting: QLayout's destructor calls
     // setLayout(0) on its parent, which would otherwise delete it again.
     QLayout* layout = d_->layout;
@@ -747,23 +754,32 @@ bool QWidget::testAttribute(Qt::WidgetAttribute attribute) const {
 // ---------------------------------------------------------------------------
 // painting
 // ---------------------------------------------------------------------------
+// Widgets parented before their top-level window exists do not have an
+// ownerWindow yet; resolve the window through the parent chain at update time.
+static QWidgetWindow* qtcUpdateWindow(QWidget* widget) {
+    QWidget* top = widget;
+    while (top->parentWidget()) top = top->parentWidget();
+    QWidgetPrivate* td = qtcWidgetPrivate(top);
+    return td ? td->window : 0;
+}
+
 void QWidget::update() { update(rect()); }
 
 void QWidget::update(const QRect& r) {
-    QWidgetWindow* win = windowHandle();
-    if (!win || r.isEmpty()) return;
+    if (r.isEmpty()) return;
+    QWidgetWindow* win = qtcUpdateWindow(this);
+    if (!win) return;
     if (!qtcEffectivelyVisible(this)) return;
     win->updateArea(qtcMapToWindowRect(this, r));
 }
 
 void QWidget::update(const QRegion& region) {
-    QWidgetWindow* win = windowHandle();
-    if (!win) return;
+    if (!qtcUpdateWindow(this)) return;
     for (int i = 0; i < region.rectCount(); ++i) update(region.rects()[i]);
 }
 
 void QWidget::repaint() {
-    QWidgetWindow* win = windowHandle();
+    QWidgetWindow* win = qtcUpdateWindow(this);
     if (!win) return;
     win->updateArea(qtcMapToWindowRect(this, rect()));
     win->flush(qtcMapToWindowRect(this, rect()));

@@ -144,7 +144,7 @@ int main(int argc, char** argv) {
 
 | 区域 | 功能 |
 | --- | --- |
-| 工具箱（左） | 按 Containers/Dialogs/Menus/Item Views/Input/Display/Buttons 分组，双击添加到当前选中容器 |
+| 工具箱（左） | 按 Containers/Dialogs/Menus/Item Views/Input/Display/Buttons 分组；双击添加控件，或直接拖到画布指定位置 |
 | 画布（中） | 真实控件渲染；点击选中、拖动移动、8 个手柄缩放、8px 网格吸附（Alt 临时关闭） |
 | 对象树（右上） | 控件层级，点击定位 |
 | 属性网格（右下） | 双击编辑：布尔直接切换，枚举下拉，颜色/字体弹系统对话框，数值/文本/几何用输入框 |

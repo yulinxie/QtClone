@@ -475,7 +475,8 @@ private:
 
 DesignerCanvas::DesignerCanvas(DesignerDocument* doc)
     : QWidget(0), doc_(doc), form_(0), selected_(0), hover_(0), overlay_(0), contextMenu_(0),
-      menuRelay_(0), hoverHandle_(-1), grid_(true), mode_(Idle), handle_(-1) {
+      menuRelay_(0), hoverHandle_(-1),
+      grid_(true), mode_(Idle), handle_(-1) {
     bandRect_ = QRect();
     bandAdditive_ = false;
     setFocusPolicy(Qt::StrongFocus);
@@ -1027,6 +1028,11 @@ void DesignerCanvas::mouseMoveEvent(QMouseEvent* event) {
         }
         move.setX(qBound(-minLeft, move.x(), qMax(-minLeft, form_->width() - 1 - maxRight)));
         move.setY(qBound(-minTop, move.y(), qMax(-minTop, form_->height() - 1 - maxBottom)));
+        // Shift constrains a drag to the dominant axis.
+        if (event->modifiers() & Qt::ShiftModifier) {
+            if (qAbs(move.x()) >= qAbs(move.y())) move.setY(0);
+            else move.setX(0);
+        }
         applySelectionMove(move);
     } else if (mode_ == Resizing) {
         QRect g = startGeometry_;
@@ -1120,6 +1126,7 @@ void DesignerCanvas::keyPressEvent(QKeyEvent* event) {
     captureToDocument();
     update();
 }
+
 
 
 void DesignerCanvas::resizeEvent(QResizeEvent* event) {

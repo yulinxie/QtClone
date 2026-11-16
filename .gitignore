@@ -1,0 +1,23 @@
+# build output
+out/
+build/
+dist/
+*.obj
+*.exe
+*.lib
+*.pdb
+*.ilk
+*.exp
+*.log
+
+# local scratch
+_probe/
+
+# IDE
+.vs/
+*.suo
+*.user
+ipch/
+
+# docs images are checked in
+!docs/images/*.png

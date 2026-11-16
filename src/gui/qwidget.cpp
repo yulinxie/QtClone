@@ -11,6 +11,8 @@ QWidgetPrivate* qtcWidgetPrivate(QWidget* widget) {
     return widget ? widget->d_func() : 0;
 }
 
+static QWidgetWindow* qtcUpdateWindow(QWidget* widget);
+
 static bool qtcEffectivelyVisible(const QWidget* widget) {
     for (const QWidget* w = widget; w; w = w->parentWidget()) {
         if (!w->isVisible()) return false;
@@ -629,13 +631,13 @@ void QWidget::setFocus(Qt::FocusReason reason) {
         d_->focusProxy->setFocus(reason);
         return;
     }
-    QWidgetWindow* win = windowHandle();
+    QWidgetWindow* win = qtcUpdateWindow(this);
     if (win) win->setFocusWidget(this, reason);
     else d_->hasFocus = true;
 }
 
 void QWidget::clearFocus() {
-    QWidgetWindow* win = windowHandle();
+    QWidgetWindow* win = qtcUpdateWindow(this);
     if (win && win->focusWidget() == this) win->setFocusWidget(0);
     d_->hasFocus = false;
 }
@@ -643,12 +645,12 @@ void QWidget::clearFocus() {
 bool QWidget::hasFocus() const { return d_->hasFocus; }
 
 QWidget* QWidget::focusWidget() const {
-    QWidgetWindow* win = windowHandle();
+    QWidgetWindow* win = qtcUpdateWindow(const_cast<QWidget*>(this));
     return win ? win->focusWidget() : 0;
 }
 
 bool QWidget::focusNextPrevChild(bool next) {
-    QWidgetWindow* win = windowHandle();
+    QWidgetWindow* win = qtcUpdateWindow(this);
     if (!win) return false;
     QWidgetList chain;
     QWidget* root = win->widget;

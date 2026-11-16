@@ -1171,6 +1171,7 @@ public:
     int topLevelItemCount() const { return roots_.count(); }
     void clear();
     QTreeWidgetItem* currentItem() const { return current_; }
+    QTreeWidgetItem* itemAt(const QPoint& pos) const;
     void setCurrentItem(QTreeWidgetItem* item);
     void expandAll();
     void collapseAll();
@@ -1287,6 +1288,9 @@ public:
     void setVerticalHeaderVisible(bool on) { vHeader_ = on; update(); }
     bool gridEnabled() const { return grid_; }
     void setGridEnabled(bool on) { grid_ = on; update(); }
+    QRect cellRect(int row, int column) const;
+    int headerHeight() const;
+    int headerWidth() const;
 
     QSize sizeHint() const;
 
@@ -1306,10 +1310,7 @@ protected:
     void resizeEvent(QResizeEvent* event);
 
 private:
-    QRect cellRect(int row, int column) const;
     QPoint cellAt(const QPoint& pos) const;
-    int headerHeight() const;
-    int headerWidth() const;
     void updateScrollBars();
     void ensureVisible(int row, int column);
 
@@ -1606,6 +1607,7 @@ private:
     int rightMargin_;
     QMenu* parentMenu_;
     QMenu* openSubmenu_;
+    bool suppressRelease_;
 };
 
 class QMenuBar : public QWidget {

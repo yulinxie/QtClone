@@ -9,6 +9,7 @@
 #include "../tools/uicgen/uicgen.h"
 #include <stdio.h>
 #include <string.h>
+#include <functional>
 
 // ---------------------------------------------------------------------------
 // property metadata helpers
@@ -335,6 +336,17 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// MenuRelay : forwards QMenu::exec selection to a callback
+// ---------------------------------------------------------------------------
+class MenuRelay : public QObject {
+public:
+    std::function<void(QAction*)> fn;
+    void onTriggered(QAction* action) {
+        if (fn) fn(action);
+    }
+};
+
+// ---------------------------------------------------------------------------
 // DesignerFormWidget : the designed surface (always light, like a sheet of paper)
 // ---------------------------------------------------------------------------
 class DesignerFormWidget : public QWidget {
@@ -348,6 +360,22 @@ protected:
         p.setBrush(Qt::NoBrush);
         p.drawRect(rect().adjusted(0, 0, -1, -1));
     }
+};
+
+class DesignerCanvas;
+
+// ---------------------------------------------------------------------------
+// SelectionOverlay : draws hover/selection adornments above the widgets
+// ---------------------------------------------------------------------------
+class SelectionOverlay : public QWidget {
+public:
+    explicit SelectionOverlay(DesignerCanvas* canvas);
+
+protected:
+    void paintEvent(QPaintEvent*);
+
+private:
+    DesignerCanvas* canvas_;
 };
 
 // ---------------------------------------------------------------------------
@@ -366,21 +394,29 @@ public:
     void select(QWidget* widget, bool notify = true);
     void deleteSelected();
     void duplicateSelected();
+    void centerSelected(bool horizontal) { centerSelection(horizontal); }
     void raiseSelected();
     void lowerSelected();
     void captureToDocument();
     void applyProperty(QWidget* widget, const char* name, const QVariant& value);
+    void updateAdornments();
+    void paintAdornments(QPainter& p);
+
+    ~DesignerCanvas();
 
     Signal<void(QWidget*)> selectionChanged;
     Signal<void()> documentModified;
+    Signal<void(QWidget*)> widgetActivated;
 
 protected:
     void paintEvent(QPaintEvent* event);
     void mousePressEvent(QMouseEvent* event);
     void mouseMoveEvent(QMouseEvent* event);
     void mouseReleaseEvent(QMouseEvent* event);
+    void mouseDoubleClickEvent(QMouseEvent* event);
     void keyPressEvent(QKeyEvent* event);
     void resizeEvent(QResizeEvent* event);
+    void leaveEvent(QEvent* event);
 
 private:
     enum Mode { Idle, Moving, Resizing };
@@ -388,10 +424,22 @@ private:
     int handleAt(const QPoint& pos) const;
     QWidget* widgetAt(const QPoint& pos, QWidget* root) const;
     QPoint snapPoint(const QPoint& p) const;
+    void updateHover(const QPoint& pos);
+    void showContextMenu(const QPoint& globalPos);
+    void centerSelection(bool horizontal);
+    void cycleSelection(int step);
+    static Qt::CursorShape cursorForHandle(int handle);
+
+    friend class SelectionOverlay;
 
     DesignerDocument* doc_;
     QWidget* form_;
     QWidget* selected_;
+    QWidget* hover_;
+    SelectionOverlay* overlay_;
+    QMenu* contextMenu_;
+    MenuRelay* menuRelay_;
+    int hoverHandle_;
     bool grid_;
     Mode mode_;
     int handle_;
@@ -400,7 +448,8 @@ private:
 };
 
 DesignerCanvas::DesignerCanvas(DesignerDocument* doc)
-    : QWidget(0), doc_(doc), form_(0), selected_(0), grid_(true), mode_(Idle), handle_(-1) {
+    : QWidget(0), doc_(doc), form_(0), selected_(0), hover_(0), overlay_(0), contextMenu_(0),
+      menuRelay_(0), hoverHandle_(-1), grid_(true), mode_(Idle), handle_(-1) {
     setFocusPolicy(Qt::StrongFocus);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     form_ = new DesignerFormWidget(this);
@@ -409,7 +458,42 @@ DesignerCanvas::DesignerCanvas(DesignerDocument* doc)
     form_->setObjectName(doc_->formClass());
     form_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     form_->show();
+    overlay_ = new SelectionOverlay(this);
+    overlay_->setGeometry(rect());
+    overlay_->show();
+
+    contextMenu_ = new QMenu(0);
+    menuRelay_ = new MenuRelay();
+    menuRelay_->fn = [this](QAction* action) {
+        if (!action) return;
+        int index = contextMenu_->actions().indexOf(action);
+        if (index == 0) deleteSelected();
+        else if (index == 1) duplicateSelected();
+        else if (index == 3) raiseSelected();
+        else if (index == 4) lowerSelected();
+        else if (index == 6) centerSelection(true);
+        else if (index == 7) centerSelection(false);
+        contextMenu_->hide();
+        setFocus(Qt::MouseFocusReason);
+    };
+    contextMenu_->triggeredAction.connect(contextMenu_, menuRelay_, &MenuRelay::onTriggered);
+
     rebuild();
+}
+
+DesignerCanvas::~DesignerCanvas() {
+    delete menuRelay_;
+    delete contextMenu_;
+}
+
+SelectionOverlay::SelectionOverlay(DesignerCanvas* canvas)
+    : QWidget(canvas), canvas_(canvas) {
+    setAttribute(Qt::WA_TransparentForMouseEvents, true);
+}
+
+void SelectionOverlay::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    canvas_->paintAdornments(p);
 }
 
 void DesignerCanvas::rebuild() {
@@ -440,6 +524,8 @@ void DesignerCanvas::rebuild() {
     QList<QXmlNode*> childNodes = top->childrenNamed(L"widget");
     for (int i = 0; i < childNodes.count(); ++i) buildWidgetTree(childNodes[i], form_);
     delete root;
+    if (overlay_) overlay_->raise();
+    updateAdornments();
     update();
 }
 
@@ -464,7 +550,7 @@ QWidget* DesignerCanvas::widgetAt(const QPoint& pos, QWidget* root) const {
 QRect DesignerCanvas::handlesRect(QList<QRect>* handles) const {
     if (!selected_) return QRect();
     QRect r = selected_->geometry().translated(form_->pos());
-    int s = 7;
+    int s = 9;
     if (handles) {
         handles->clearAll();
         handles->append(QRect(r.left() - s / 2, r.top() - s / 2, s, s));
@@ -490,6 +576,7 @@ int DesignerCanvas::handleAt(const QPoint& pos) const {
 void DesignerCanvas::select(QWidget* widget, bool notify) {
     if (selected_ == widget) return;
     selected_ = widget;
+    updateAdornments();
     update();
     if (notify) selectionChanged(selected_);
 }
@@ -589,6 +676,15 @@ void DesignerCanvas::paintEvent(QPaintEvent*) {
             }
         }
     }
+}
+
+void DesignerCanvas::paintAdornments(QPainter& p) {
+    if (hover_ && hover_ != selected_) {
+        QRect h = hover_->geometry().translated(form_->pos());
+        p.setPen(QPen(QColor(0x00, 0x78, 0xD4, 120), 1, Qt::DashLine));
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(h);
+    }
 
     if (selected_) {
         QList<QRect> handles;
@@ -596,14 +692,92 @@ void DesignerCanvas::paintEvent(QPaintEvent*) {
         p.setPen(QPen(QTheme::colors().accent, 1));
         p.setBrush(Qt::NoBrush);
         p.drawRect(r);
+
+
         p.setBrush(QBrush(QColor(0xFF, 0xFF, 0xFF)));
         p.setPen(QPen(QTheme::colors().accent, 1));
         for (int i = 0; i < handles.count(); ++i) p.drawRect(handles[i]);
     }
 }
 
+Qt::CursorShape DesignerCanvas::cursorForHandle(int handle) {
+    switch (handle) {
+    case 0: case 7: return Qt::SizeFDiagCursor;
+    case 2: case 5: return Qt::SizeBDiagCursor;
+    case 1: case 6: return Qt::SizeVerCursor;
+    case 3: case 4: return Qt::SizeHorCursor;
+    default: return Qt::ArrowCursor;
+    }
+}
+
+void DesignerCanvas::updateHover(const QPoint& pos) {
+    if (mode_ != Idle) return;
+    int handle = selected_ ? handleAt(pos) : -1;
+    QWidget* hit = 0;
+    if (handle < 0) hit = widgetAt(pos - form_->pos(), form_);
+    Qt::CursorShape shape = Qt::ArrowCursor;
+    if (handle >= 0) shape = cursorForHandle(handle);
+    else if (hit) shape = Qt::SizeAllCursor;
+    setCursor(QCursor(shape));
+    if (hit != hover_ || handle != hoverHandle_) {
+        hover_ = hit;
+        hoverHandle_ = handle;
+        updateAdornments();
+        update();
+    }
+}
+
+void DesignerCanvas::leaveEvent(QEvent* event) {
+    hover_ = 0;
+    hoverHandle_ = -1;
+    QWidget::leaveEvent(event);
+    updateAdornments();
+    update();
+}
+
+void DesignerCanvas::cycleSelection(int step) {
+    QList<QWidget*> children = form_->childrenWidgets();
+    if (children.isEmpty()) return;
+    int index = children.indexOf(selected_);
+    index += step;
+    if (index < 0) index = children.count() - 1;
+    if (index >= children.count()) index = 0;
+    select(children[index]);
+}
+
+void DesignerCanvas::centerSelection(bool horizontal) {
+    if (!selected_) return;
+    QRect g = selected_->geometry();
+    if (horizontal) g.moveLeft(qMax(0, (form_->width() - g.width()) / 2));
+    else g.moveTop(qMax(0, (form_->height() - g.height()) / 2));
+    selected_->setGeometry(g);
+    captureToDocument();
+    update();
+}
+
+void DesignerCanvas::showContextMenu(const QPoint& globalPos) {
+    contextMenu_->clear();
+    contextMenu_->addAction(QString(L"\u5220\u9664"));
+    contextMenu_->addAction(QString(L"\u590d\u5236\u4e00\u4efd"));
+    contextMenu_->addSeparator();
+    contextMenu_->addAction(QString(L"\u7f6e\u4e8e\u9876\u5c42"));
+    contextMenu_->addAction(QString(L"\u7f6e\u4e8e\u5e95\u5c42"));
+    contextMenu_->addSeparator();
+    contextMenu_->addAction(QString(L"\u6c34\u5e73\u5c45\u4e2d"));
+    contextMenu_->addAction(QString(L"\u5782\u76f4\u5c45\u4e2d"));
+    contextMenu_->popup(globalPos);
+}
+
 void DesignerCanvas::mousePressEvent(QMouseEvent* event) {
+    if (contextMenu_ && contextMenu_->isVisible() && event->button() == Qt::LeftButton)
+        contextMenu_->hide();
     setFocus(Qt::MouseFocusReason);
+    if (event->button() == Qt::RightButton) {
+        QWidget* hit = widgetAt(event->pos() - form_->pos(), form_);
+        select(hit);
+        showContextMenu(event->globalPos());
+        return;
+    }
     if (event->button() != Qt::LeftButton) return;
     int handle = selected_ ? handleAt(event->pos()) : -1;
     if (handle >= 0) {
@@ -628,11 +802,19 @@ void DesignerCanvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void DesignerCanvas::mouseMoveEvent(QMouseEvent* event) {
-    if (mode_ == Idle || !selected_) return;
+    if (mode_ == Idle) {
+        updateHover(event->pos());
+        return;
+    }
+    if (!selected_) return;
     QPoint delta = event->pos() - dragStart_;
     if (mode_ == Moving) {
         QPoint target = startGeometry_.topLeft() + delta;
         target = snapPoint(target);
+        int maxX = qMax(0, form_->width() - startGeometry_.width());
+        int maxY = qMax(0, form_->height() - startGeometry_.height());
+        target.setX(qBound(0, target.x(), maxX));
+        target.setY(qBound(0, target.y(), maxY));
         selected_->move(target);
     } else if (mode_ == Resizing) {
         QRect g = startGeometry_;
@@ -649,8 +831,20 @@ void DesignerCanvas::mouseMoveEvent(QMouseEvent* event) {
         case 7: g.setBottomRight(g.bottomRight() + delta); break;
         default: break;
         }
-        if (g.width() < minW) { g.setLeft(startGeometry_.left()); g.setRight(startGeometry_.right()); }
-        if (g.height() < minH) { g.setTop(startGeometry_.top()); g.setBottom(startGeometry_.bottom()); }
+        int needW = qMax(minW, selected_->minimumSize().width());
+        int needH = qMax(minH, selected_->minimumSize().height());
+        if (g.width() < needW) {
+            if (handle_ == 0 || handle_ == 3 || handle_ == 5) g.setLeft(g.right() - needW + 1);
+            else g.setRight(g.left() + needW - 1);
+        }
+        if (g.height() < needH) {
+            if (handle_ == 0 || handle_ == 1 || handle_ == 2) g.setTop(g.bottom() - needH + 1);
+            else g.setBottom(g.top() + needH - 1);
+        }
+        if (g.left() < 0) g.setLeft(0);
+        if (g.top() < 0) g.setTop(0);
+        if (g.right() >= form_->width()) g.setRight(form_->width() - 1);
+        if (g.bottom() >= form_->height()) g.setBottom(form_->height() - 1);
         selected_->setGeometry(g);
     }
     update();
@@ -664,7 +858,24 @@ void DesignerCanvas::mouseReleaseEvent(QMouseEvent*) {
     }
 }
 
+void DesignerCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (event->button() != Qt::LeftButton) return;
+    QWidget* hit = widgetAt(event->pos() - form_->pos(), form_);
+    if (hit) {
+        select(hit);
+        widgetActivated(hit);
+    }
+}
+
 void DesignerCanvas::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Escape) {
+        select(0);
+        return;
+    }
+    if (event->key() == Qt::Key_Tab) {
+        cycleSelection((event->modifiers() & Qt::ShiftModifier) ? -1 : 1);
+        return;
+    }
     if (!selected_) {
         QWidget::keyPressEvent(event);
         return;
@@ -685,12 +896,31 @@ void DesignerCanvas::keyPressEvent(QKeyEvent* event) {
 }
 
 void DesignerCanvas::resizeEvent(QResizeEvent* event) {
+    if (overlay_) overlay_->setGeometry(rect());
     QWidget::resizeEvent(event);
+}
+
+void DesignerCanvas::updateAdornments() {
+    if (overlay_) overlay_->update();
 }
 
 // ---------------------------------------------------------------------------
 // PropertyEditor
 // ---------------------------------------------------------------------------
+class InlineEdit : public QLineEdit {
+public:
+    Signal<void()> cancelled;
+
+protected:
+    void keyPressEvent(QKeyEvent* event) {
+        if (event->key() == Qt::Key_Escape) {
+            cancelled();
+            return;
+        }
+        QLineEdit::keyPressEvent(event);
+    }
+};
+
 class PropertyEditor : public QWidget {
 public:
     PropertyEditor();
@@ -704,13 +934,37 @@ protected:
 
 private:
     void onCellDoubleClicked(int row, int column);
+    void onCellClicked(int row, int column);
+    void onFilterChanged(const QString& text);
+    void beginInlineEdit(int row);
+    void commitInlineEdit();
+    void cancelInlineEdit();
     bool editValue(QWidget* widget, QMetaProperty prop);
 
     QTableWidget* table_;
+    QLineEdit* filter_;
+    InlineEdit* inline_;
+    int inlineRow_;
     QWidget* target_;
 };
 
-PropertyEditor::PropertyEditor() : QWidget(0), target_(0) {
+PropertyEditor::PropertyEditor()
+    : QWidget(0), table_(0), filter_(0), inline_(0), inlineRow_(-1), target_(0) {
+    filter_ = new QLineEdit(this);
+    filter_->setPlaceholderText(L"\u8fc7\u6ee4\u5c5e\u6027...");
+    {
+        QFont f = filter_->font();
+        f.setPixelSize(12);
+        filter_->setFont(f);
+    }
+
+    inline_ = new InlineEdit();
+    inline_->setParentWidget(this);
+    inline_->hide();
+    QObject::connect(inline_, inline_->returnPressed, this, &PropertyEditor::commitInlineEdit);
+    QObject::connect(inline_, inline_->cancelled, this, &PropertyEditor::cancelInlineEdit);
+    QObject::connect(filter_, filter_->textChanged, this, &PropertyEditor::onFilterChanged);
+
     table_ = new QTableWidget(this);
     table_->setColumnCount(2);
     QStringList headers;
@@ -721,22 +975,34 @@ PropertyEditor::PropertyEditor() : QWidget(0), target_(0) {
     table_->setRowHeight(24);
     table_->setHorizontalHeaderVisible(true);
     QObject::connect(table_, table_->cellDoubleClicked, this, &PropertyEditor::onCellDoubleClicked);
+    QObject::connect(table_, table_->cellClicked, this, &PropertyEditor::onCellClicked);
+
+    QVBoxLayout* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(2);
+    layout->addWidget(filter_);
+    layout->addWidget(table_, 1);
 }
 
 void PropertyEditor::setTarget(QWidget* widget) {
+    cancelInlineEdit();
     target_ = widget;
     refresh();
 }
 
 void PropertyEditor::refresh() {
+    cancelInlineEdit();
     table_->clearContents();
     table_->setRowCount(0);
     if (!target_) return;
+    QString needle = filter_ ? filter_->text().toLower() : QString();
     const QMetaObject* mo = target_->metaObject();
     int rows = 0;
     for (int i = 0; i < mo->propertyCount(); ++i) {
         QMetaProperty prop = mo->property(i);
         if (!prop.isDesignable()) continue;
+        if (!needle.isEmpty() &&
+            QString::fromUtf8(prop.name()).toLower().indexOf(needle) < 0) continue;
         ++rows;
     }
     table_->setRowCount(rows);
@@ -744,16 +1010,87 @@ void PropertyEditor::refresh() {
     for (int i = 0; i < mo->propertyCount(); ++i) {
         QMetaProperty prop = mo->property(i);
         if (!prop.isDesignable()) continue;
+        if (!needle.isEmpty() &&
+            QString::fromUtf8(prop.name()).toLower().indexOf(needle) < 0) continue;
         table_->setItem(row, 0, new QTableWidgetItem(QString::fromUtf8(prop.name())));
-        QVariant value = prop.read(target_);
-        table_->setItem(row, 1, new QTableWidgetItem(value.toString()));
+        table_->setItem(row, 1, new QTableWidgetItem(prop.read(target_).toString()));
         ++row;
     }
 }
 
 void PropertyEditor::resizeEvent(QResizeEvent* event) {
-    table_->setGeometry(rect());
     QWidget::resizeEvent(event);
+}
+
+void PropertyEditor::onFilterChanged(const QString&) { refresh(); }
+
+void PropertyEditor::onCellClicked(int row, int column) {
+    if (!target_ || column != 1) return;
+    QTableWidgetItem* nameItem = table_->item(row, 0);
+    if (!nameItem) return;
+    std::string name = nameItem->text().toUtf8();
+    int index = target_->metaObject()->indexOfProperty(name.c_str());
+    if (index < 0) return;
+    QMetaProperty prop = target_->metaObject()->property(index);
+    QString type = QString::fromUtf8(prop.typeName());
+    if (type == L"bool") {
+        prop.write(target_, QVariant(!prop.read(target_).toBool()));
+        target_->update();
+        refresh();
+        propertyChanged(target_, prop.name(), prop.read(target_));
+        return;
+    }
+    if (type == L"QString" || type == L"int" || type == L"uint" || type == L"double")
+        beginInlineEdit(row);
+}
+
+void PropertyEditor::beginInlineEdit(int row) {
+    if (!target_ || !inline_) return;
+    inlineRow_ = row;
+    QRect cell = table_->cellRect(row, 1);
+    inline_->setGeometry(cell.translated(table_->pos()));
+    inline_->setText(table_->item(row, 1) ? table_->item(row, 1)->text() : QString());
+    inline_->show();
+    inline_->raise();
+    inline_->setFocus();
+    inline_->selectAll();
+}
+
+void PropertyEditor::commitInlineEdit() {
+    if (!inline_ || !inline_->isVisible() || !target_ || inlineRow_ < 0) return;
+    QTableWidgetItem* nameItem = table_->item(inlineRow_, 0);
+    if (!nameItem) {
+        cancelInlineEdit();
+        return;
+    }
+    std::string name = nameItem->text().toUtf8();
+    int index = target_->metaObject()->indexOfProperty(name.c_str());
+    if (index >= 0) {
+        QMetaProperty prop = target_->metaObject()->property(index);
+        QString type = QString::fromUtf8(prop.typeName());
+        QString text = inline_->text();
+        if (type == L"int" || type == L"uint") {
+            bool ok = false;
+            int value = text.toInt(&ok);
+            if (ok) prop.write(target_, QVariant(value));
+        } else if (type == L"double") {
+            bool ok = false;
+            double value = text.toDouble(&ok);
+            if (ok) prop.write(target_, QVariant(value));
+        } else {
+            prop.write(target_, QVariant(text));
+        }
+        target_->update();
+        propertyChanged(target_, prop.name(), prop.read(target_));
+    }
+    cancelInlineEdit();
+    refresh();
+}
+
+void PropertyEditor::cancelInlineEdit() {
+    if (!inline_) return;
+    inline_->hide();
+    inlineRow_ = -1;
 }
 
 void PropertyEditor::onCellDoubleClicked(int row, int) {
@@ -876,8 +1213,38 @@ public:
     ToolboxTree() : dragActive_(false) {}
 
     Signal<void(const QString&, const QPoint&)> itemDropped;
+    Signal<void(const QString&)> classActivated;
+
+    void applyFilter(const QString& text) {
+        QString needle = text.toLower();
+        for (int i = 0; i < topLevelItemCount(); ++i) {
+            QTreeWidgetItem* group = topLevelItem(i);
+            int visible = 0;
+            for (int c = 0; c < group->childCount(); ++c) {
+                QTreeWidgetItem* child = group->child(c);
+                bool match = needle.isEmpty() ||
+                             child->text(0).toLower().indexOf(needle) >= 0;
+                child->setHidden(!match);
+                if (match) ++visible;
+            }
+            group->setHidden(visible == 0);
+            if (!needle.isEmpty() && visible > 0) group->setExpanded(true);
+        }
+        update();
+    }
 
 protected:
+    void keyPressEvent(QKeyEvent* event) {
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            QString cls = classNameOf(currentItem());
+            if (!cls.isEmpty()) {
+                classActivated(cls);
+                return;
+            }
+        }
+        QTreeWidget::keyPressEvent(event);
+    }
+
     void mousePressEvent(QMouseEvent* event) {
         QTreeWidget::mousePressEvent(event);
         if (event->button() != Qt::LeftButton) return;
@@ -921,6 +1288,26 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// InspectorTree : object tree with a context menu
+// ---------------------------------------------------------------------------
+class InspectorTree : public QTreeWidget {
+public:
+    InspectorTree() {}
+    Signal<void(QTreeWidgetItem*, const QPoint&)> contextMenuRequested;
+
+protected:
+    void mousePressEvent(QMouseEvent* event) {
+        if (event->button() == Qt::RightButton) {
+            QTreeWidgetItem* item = itemAt(event->pos());
+            if (item) setCurrentItem(item);
+            contextMenuRequested(item, event->globalPos());
+            return;
+        }
+        QTreeWidget::mousePressEvent(event);
+    }
+};
+
+// ---------------------------------------------------------------------------
 // DesignerWindow
 // ---------------------------------------------------------------------------
 class DesignerWindow : public QMainWindow {
@@ -941,6 +1328,9 @@ public:
 
     int selfTest();
     bool screenshot(const QString& path);
+
+protected:
+    void closeEvent(QCloseEvent* event);
 
 private:
     void buildUi();
@@ -971,10 +1361,25 @@ private:
     QWidget* addWidgetAt(const QString& className, const QPoint& formPos);
     void onTreeClicked(QTreeWidgetItem* item, int column);
     void onPropertyChanged(QWidget* widget, const char* name, const QVariant& value);
+    void onToolboxFilter(const QString& text);
+    void onToolboxClassActivated(const QString& className);
+    void onWidgetActivated(QWidget* widget);
+    void onInspectorContextMenu(QTreeWidgetItem* item, const QPoint& globalPos);
+    void onTreeDoubleClicked(QTreeWidgetItem* item, int column);
+    void onFormSize();
+    void onCenterH();
+    void onCenterV();
+    void onRaise();
+    void onLower();
+    void renameWidget(QWidget* widget);
+    void updateWindowTitle();
 
     DesignerDocument doc_;
     DesignerCanvas* canvas_;
-    QTreeWidget* tree_;
+    InspectorTree* tree_;
+    QMenu* objectMenu_;
+    MenuRelay* objectRelay_;
+    QString contextObject_;
     ToolboxTree* toolbox_;
     PropertyEditor* properties_;
     QStatusBar* status_;
@@ -1028,6 +1433,18 @@ void DesignerWindow::buildMenus() {
     QAction* dupAct = edit->addAction(L"复制一份");
     dupAct->setShortcut(L"Ctrl+D");
     QObject::connect(dupAct, dupAct->triggered, this, &DesignerWindow::onDuplicate);
+    edit->addSeparator();
+    QAction* formSizeAct = edit->addAction(L"窗体大小...");
+    QObject::connect(formSizeAct, formSizeAct->triggered, this, &DesignerWindow::onFormSize);
+    QAction* centerHAct = edit->addAction(L"水平居中");
+    QObject::connect(centerHAct, centerHAct->triggered, this, &DesignerWindow::onCenterH);
+    QAction* centerVAct = edit->addAction(L"垂直居中");
+    QObject::connect(centerVAct, centerVAct->triggered, this, &DesignerWindow::onCenterV);
+    edit->addSeparator();
+    QAction* frontAct = edit->addAction(L"置于顶层");
+    QObject::connect(frontAct, frontAct->triggered, this, &DesignerWindow::onRaise);
+    QAction* backAct = edit->addAction(L"置于底层");
+    QObject::connect(backAct, backAct->triggered, this, &DesignerWindow::onLower);
 
     QMenu* view = bar->addMenu(L"视图");
     QAction* gridAct = view->addAction(L"显示网格");
@@ -1066,8 +1483,19 @@ void DesignerWindow::buildMenus() {
 void DesignerWindow::buildUi() {
     QSplitter* main = new QSplitter(Qt::Horizontal);
 
+    // ---- toolbox pane: filter + class tree ----
+    QWidget* toolboxPane = new QWidget();
+    QVBoxLayout* toolboxLayout = new QVBoxLayout(toolboxPane);
+    toolboxLayout->setContentsMargins(0, 0, 0, 0);
+    toolboxLayout->setSpacing(2);
+    QLineEdit* toolboxFilter = new QLineEdit();
+    toolboxFilter->setPlaceholderText(L"\u8fc7\u6ee4\u63a7\u4ef6...");
+    toolboxFilter->setClearButtonEnabled(true);
+    QObject::connect(toolboxFilter, toolboxFilter->textChanged, this, &DesignerWindow::onToolboxFilter);
+    toolboxLayout->addWidget(toolboxFilter);
+
     toolbox_ = new ToolboxTree();
-    toolbox_->setHeaderLabels(QStringList() << L"工具箱");
+    toolbox_->setHeaderLabels(QStringList() << L"\u63a7\u4ef6");
     QList<QWidgetClassInfo> classes = QWidgetFactory::classes();
     QStringList groups;
     for (int i = 0; i < classes.count(); ++i) {
@@ -1079,6 +1507,9 @@ void DesignerWindow::buildUi() {
         groupItem->setExpanded(true);
         for (int i = 0; i < classes.count(); ++i) {
             if (QString::fromUtf8(classes[i].group) != groups[g]) continue;
+            QString clsName = QString::fromUtf8(classes[i].className);
+            if (clsName == L"QDialog" || clsName == L"QMainWindow" || clsName == L"QMessageBox")
+                continue;
             QTreeWidgetItem* item = new QTreeWidgetItem(QStringList() << QString::fromUtf8(classes[i].label));
             item->setData(0, Qt::UserRole, QVariant(QString::fromUtf8(classes[i].className)));
             groupItem->addChild(item);
@@ -1087,30 +1518,68 @@ void DesignerWindow::buildUi() {
     }
     QObject::connect(toolbox_, toolbox_->itemDoubleClicked, this, &DesignerWindow::onToolboxActivated);
     toolbox_->itemDropped.connect(toolbox_, this, &DesignerWindow::onToolboxDropped);
+    toolbox_->classActivated.connect(toolbox_, this, &DesignerWindow::onToolboxClassActivated);
+    toolboxLayout->addWidget(toolbox_, 1);
 
+    // ---- canvas ----
     canvas_ = new DesignerCanvas(&doc_);
     canvas_->selectionChanged.connect(this, this, &DesignerWindow::onSelectionChanged);
     canvas_->documentModified.connect(this, this, &DesignerWindow::onDocumentModified);
+    canvas_->widgetActivated.connect(canvas_, this, &DesignerWindow::onWidgetActivated);
 
+    // ---- right: object tree + properties ----
     QSplitter* right = new QSplitter(Qt::Vertical);
-    tree_ = new QTreeWidget();
-    tree_->setHeaderLabels(QStringList() << L"对象");
+    tree_ = new InspectorTree();
+    tree_->setHeaderLabels(QStringList() << L"\u5bf9\u8c61" << L"\u7c7b\u578b");
+    tree_->setIndentation(14);
     QObject::connect(tree_, tree_->itemClicked, this, &DesignerWindow::onTreeClicked);
+    QObject::connect(tree_, tree_->itemDoubleClicked, this, &DesignerWindow::onTreeDoubleClicked);
+    tree_->contextMenuRequested.connect(tree_, this, &DesignerWindow::onInspectorContextMenu);
+    objectMenu_ = new QMenu(0);
+    objectRelay_ = new MenuRelay();
+    objectRelay_->fn = [this](QAction* action) {
+        if (!action || !canvas_->form()) return;
+        QString name = contextObject_;
+        QWidget* widget = (name == canvas_->form()->objectName())
+                              ? canvas_->form()
+                              : canvas_->form()->findChild<QWidget>(name);
+        int index = objectMenu_->actions().indexOf(action);
+        if (!widget) return;
+        if (index == 0) {
+            renameWidget(widget);
+        } else if (index == 1) {
+            canvas_->select(widget);
+            canvas_->deleteSelected();
+            refreshInspector();
+            refreshProperties();
+        } else if (index == 3) {
+            widget->raise();
+            canvas_->captureToDocument();
+            canvas_->update();
+        } else if (index == 4) {
+            widget->lower();
+            canvas_->captureToDocument();
+            canvas_->update();
+        }
+        objectMenu_->hide();
+    };
+    objectMenu_->triggeredAction.connect(objectMenu_, objectRelay_, &MenuRelay::onTriggered);
+
     properties_ = new PropertyEditor();
     properties_->propertyChanged.connect(this, this, &DesignerWindow::onPropertyChanged);
     right->addWidget(tree_);
     right->addWidget(properties_);
     right->setSizes(QList<int>() << 220 << 420);
 
-    main->addWidget(toolbox_);
+    main->addWidget(toolboxPane);
     main->addWidget(canvas_);
     main->addWidget(right);
-    main->setSizes(QList<int>() << 190 << 660 << 330);
+    main->setSizes(QList<int>() << 200 << 660 << 340);
     setCentralWidget(main);
 
     status_ = new QStatusBar();
     setStatusBar(status_);
-    status_->showMessage(L"就绪 - 双击工具箱添加控件，拖动移动，拖动手柄缩放");
+    status_->showMessage(L"\u5c31\u7eea - \u53cc\u51fb\u6216\u62d6\u62fd\u5de5\u5177\u7bb1\u6dfb\u52a0\u63a7\u4ef6");
 }
 
 void DesignerWindow::setStatus(const QString& text) {
@@ -1119,6 +1588,7 @@ void DesignerWindow::setStatus(const QString& text) {
 
 void DesignerWindow::newDocument() {
     doc_.reset(L"Form1");
+    doc_.setModified(false);
     canvas_->rebuild();
     refreshInspector();
     refreshProperties();
@@ -1215,19 +1685,23 @@ void DesignerWindow::refreshInspector() {
     updatingInspector_ = true;
     tree_->clear();
     if (!canvas_->form()) { updatingInspector_ = false; return; }
-    QTreeWidgetItem* root = new QTreeWidgetItem(QStringList() << canvas_->form()->objectName());
-    root->setData(0, Qt::UserRole, QVariant());
+    QTreeWidgetItem* root = new QTreeWidgetItem(QStringList()
+        << canvas_->form()->objectName() << L"QWidget");
     tree_->addTopLevelItem(root);
     QList<QWidget*> children = canvas_->form()->childrenWidgets();
     for (int i = 0; i < children.count(); ++i) {
-        QTreeWidgetItem* child = new QTreeWidgetItem(QStringList() << children[i]->objectName());
+        QTreeWidgetItem* child = new QTreeWidgetItem(QStringList()
+            << children[i]->objectName() << QString(children[i]->className()));
         root->addChild(child);
         QList<QWidget*> grandchildren = children[i]->childrenWidgets();
         for (int g = 0; g < grandchildren.count(); ++g)
-            child->addChild(new QTreeWidgetItem(QStringList() << grandchildren[g]->objectName()));
+            child->addChild(new QTreeWidgetItem(QStringList()
+                << grandchildren[g]->objectName() << QString(grandchildren[g]->className())));
+        child->setExpanded(true);
     }
     root->setExpanded(true);
     updatingInspector_ = false;
+    updateWindowTitle();
 }
 
 void DesignerWindow::refreshProperties() {
@@ -1249,6 +1723,7 @@ void DesignerWindow::onDocumentModified() {
     refreshInspector();
     refreshProperties();
     doc_.setModified(true);
+    updateWindowTitle();
 }
 
 void DesignerWindow::onPropertyChanged(QWidget* widget, const char* name, const QVariant&) {
@@ -1387,6 +1862,105 @@ void DesignerWindow::onAbout() {
                        L"无 moc、无第三方依赖，支持 VS2010。");
 }
 void DesignerWindow::onQuit() { QApplication::quit(); }
+
+void DesignerWindow::onToolboxFilter(const QString& text) {
+    toolbox_->applyFilter(text);
+}
+
+void DesignerWindow::onToolboxClassActivated(const QString& className) {
+    addWidgetByClass(className);
+}
+
+void DesignerWindow::onWidgetActivated(QWidget* widget) {
+    Q_UNUSED(widget);
+    refreshProperties();
+    properties_->setFocus();
+}
+
+void DesignerWindow::onTreeDoubleClicked(QTreeWidgetItem* item, int) {
+    if (!item) return;
+    QWidget* widget = canvas_->form()->findChild<QWidget>(item->text(0));
+    if (widget) renameWidget(widget);
+}
+
+void DesignerWindow::renameWidget(QWidget* widget) {
+    if (!widget || widget == canvas_->form()) return;
+    bool ok = false;
+    QString name = QInputDialog::getText(this, L"\u91cd\u547d\u540d", L"\u5bf9\u8c61\u540d", 0,
+                                         widget->objectName(), &ok);
+    if (!ok) return;
+    name = name.trimmed();
+    if (name.isEmpty()) return;
+    if (canvas_->form()->findChild<QWidget>(name)) {
+        QMessageBox::warning(this, L"\u91cd\u547d\u540d", L"\u540d\u79f0\u5df2\u5b58\u5728");
+        return;
+    }
+    widget->setObjectName(name);
+    canvas_->captureToDocument();
+    refreshInspector();
+    refreshProperties();
+    setStatus(L"\u5df2\u91cd\u547d\u540d\u4e3a " + name);
+}
+
+void DesignerWindow::onInspectorContextMenu(QTreeWidgetItem* item, const QPoint& globalPos) {
+    if (!item) return;
+    contextObject_ = item->text(0);
+    objectMenu_->clear();
+    objectMenu_->addAction(QString(L"\u91cd\u547d\u540d..."));
+    objectMenu_->addAction(QString(L"\u5220\u9664"));
+    objectMenu_->addSeparator();
+    objectMenu_->addAction(QString(L"\u7f6e\u4e8e\u9876\u5c42"));
+    objectMenu_->addAction(QString(L"\u7f6e\u4e8e\u5e95\u5c42"));
+    objectMenu_->popup(globalPos);
+}
+
+void DesignerWindow::onFormSize() {
+    bool ok = false;
+    QWidget* form = canvas_->form();
+    QString text = QString::number(form->width()) + L" x " + QString::number(form->height());
+    QString input = QInputDialog::getText(this, L"\u7a97\u4f53\u5927\u5c0f",
+                                          L"\u5bbd x \u9ad8 (\u50cf\u7d20)", 0, text, &ok);
+    if (!ok) return;
+    QStringList parts = input.split(L'x');
+    if (parts.count() != 2) {
+        QMessageBox::warning(this, L"\u7a97\u4f53\u5927\u5c0f", L"\u8bf7\u8f93\u5165\u5982 640 x 480");
+        return;
+    }
+    int w = parts[0].trimmed().toInt();
+    int h = parts[1].trimmed().toInt();
+    if (w < 80 || h < 60) {
+        QMessageBox::warning(this, L"\u7a97\u4f53\u5927\u5c0f", L"\u6700\u5c0f 80 x 60");
+        return;
+    }
+    form->resize(w, h);
+    canvas_->captureToDocument();
+    canvas_->update();
+    refreshProperties();
+}
+
+void DesignerWindow::onCenterH() { canvas_->centerSelected(true); }
+void DesignerWindow::onCenterV() { canvas_->centerSelected(false); }
+void DesignerWindow::onRaise() { canvas_->raiseSelected(); }
+void DesignerWindow::onLower() { canvas_->lowerSelected(); }
+
+void DesignerWindow::updateWindowTitle() {
+    QString name = doc_.filePath().isEmpty() ? QString(L"\u672a\u547d\u540d") : doc_.filePath();
+    setWindowTitle(L"QtClone Designer - " + name + (doc_.modified() ? L" *" : L""));
+}
+
+void DesignerWindow::closeEvent(QCloseEvent* event) {
+    if (doc_.modified()) {
+        QMessageBox::StandardButton answer = QMessageBox::question(
+            this, L"\u9000\u51fa", L"\u6709\u672a\u4fdd\u5b58\u7684\u4fee\u6539\uff0c\u786e\u5b9a\u9000\u51fa\uff1f",
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            event->ignore();
+            return;
+        }
+    }
+    event->accept();
+    QWidget::closeEvent(event);
+}
 
 int DesignerWindow::selfTest() {
     int failures = 0;

@@ -562,6 +562,10 @@ void QTreeWidget::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
 }
 
+QTreeWidgetItem* QTreeWidget::itemAt(const QPoint& pos) const {
+    return itemAtPoint(pos, 0, 0, 0);
+}
+
 QTreeWidgetItem* QTreeWidget::itemAtPoint(const QPoint& pos, int* depth, QRect* rowRect, int* column) const {
     QList<QTreeWidgetItem*> items;
     QList<int> depths;

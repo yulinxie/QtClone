@@ -378,7 +378,6 @@ QMouseEvent ev(type, localPos, mapToGlobal(clientPos), button, buttons, mods);
             grabber = 0;
             if (GetCapture() == hwnd) ReleaseCapture();
         }
-        if (popup) widget->hide();
     }
 }
 

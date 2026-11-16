@@ -125,13 +125,13 @@ bool QMenu::qtcWriteProperty(int id, const QVariant& value) {
 
 QMenu::QMenu(QWidget* parent)
     : QWidget(parent, Qt::Popup), active_(0), activeIndex_(-1), itemHeight_(26),
-      separatorHeight_(9), leftMargin_(26), rightMargin_(28), parentMenu_(0), openSubmenu_(0) {
+      separatorHeight_(9), leftMargin_(26), rightMargin_(28), parentMenu_(0), openSubmenu_(0), suppressRelease_(false) {
     setFocusPolicy(Qt::StrongFocus);
 }
 
 QMenu::QMenu(const QString& title, QWidget* parent)
     : QWidget(parent, Qt::Popup), title_(title), active_(0), activeIndex_(-1), itemHeight_(26),
-      separatorHeight_(9), leftMargin_(26), rightMargin_(28), parentMenu_(0), openSubmenu_(0) {
+      separatorHeight_(9), leftMargin_(26), rightMargin_(28), parentMenu_(0), openSubmenu_(0), suppressRelease_(false) {
     setFocusPolicy(Qt::StrongFocus);
 }
 
@@ -268,7 +268,10 @@ void QMenu::setActiveAction(QAction* action) {
 void QMenu::popup(const QPoint& globalPos) {
     updateGeometryForActions();
     aboutToShow();
-    setGeometry(QRect(globalPos, size()));
+    suppressRelease_ = true;
+    QPoint local = globalPos;
+    if (parentWidget()) local = parentWidget()->mapFromGlobal(globalPos);
+    setGeometry(QRect(local, size()));
     show();
     raise();
     setFocus(Qt::PopupFocusReason);
@@ -340,6 +343,10 @@ void QMenu::mousePressEvent(QMouseEvent* event) {
 }
 
 void QMenu::mouseReleaseEvent(QMouseEvent* event) {
+    if (suppressRelease_) {
+        suppressRelease_ = false;
+        return;
+    }
     if (event->button() != Qt::LeftButton) return;
     int index = indexAt(event->pos());
     if (index < 0) { hide(); return; }

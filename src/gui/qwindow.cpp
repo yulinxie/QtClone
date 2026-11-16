@@ -369,7 +369,7 @@ void QWidgetWindow::handleMouse(QEvent::Type type, const QPoint& clientPos,
     }
 
     if (target) {
-        QMouseEvent ev(type, localPos, mapToGlobal(clientPos), button, buttons, mods);
+QMouseEvent ev(type, localPos, mapToGlobal(clientPos), button, buttons, mods);
         qtcSendEvent(target, &ev);
     }
 

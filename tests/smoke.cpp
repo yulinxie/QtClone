@@ -14,9 +14,11 @@ static void check(bool ok, const char* what) {
     ++g_checks;
     if (!ok) {
         printf("FAIL  %s\n", what);
+        fflush(stdout);
         ++g_failures;
     } else {
         printf("ok    %s\n", what);
+        fflush(stdout);
     }
 }
 
@@ -29,7 +31,7 @@ public:
 
 static void testCore() {
     check(QString("abc") == QString(L"abc"), "QString equality");
-    check(QString::fromUtf8("中文").size() == 2, "UTF-8 decoding");
+    check(QString::fromUtf8("\xE4\xB8\xAD\xE6\x96\x87").size() == 2, "UTF-8 decoding");
     check(QString("%1-%2").arg(1).arg(2) == QString(L"1-2"), "QString::arg");
     check(QString("a,b,c").split(L',').count() == 3, "QString::split");
     check(QVariant(QString("42")).toInt() == 42, "QVariant string -> int");
@@ -94,7 +96,22 @@ static void testWidgets() {
     host.show();
     layout->activate();
     check(b1->width() + b2->width() == 300, "box layout fills width");
-    check(b1->height() == 100, "box layout fills height");
+    check(b1->height() == b1->sizeHint().height(), "fixed height policy respected");
+
+    // a trailing stretch absorbs surplus space instead of stretching widgets
+    {
+        QWidget bar;
+        bar.resize(200, 40);
+        QHBoxLayout* row = new QHBoxLayout(&bar);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(0);
+        QPushButton* fixedButton = new QPushButton(L"x");
+        row->addWidget(fixedButton);
+        row->addStretch(1);
+        bar.show();
+        row->activate();
+        check(fixedButton->width() == fixedButton->sizeHint().width(), "stretch takes surplus");
+    }
 
     // style sheet
     b1->setStyleSheet(L"QPushButton { background-color: #112233; border-radius: 4px; }");
@@ -157,12 +174,15 @@ static void testUiCompiler() {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    QApplication app(argc, argv);
     printf("== QtClone smoke tests ==\n");
+    fflush(stdout);
     testCore();
     testXml();
     testWidgets();
     testUiCompiler();
     printf("== %s: %d checks, %d failures ==\n", g_failures ? "FAILED" : "PASSED", g_checks, g_failures);
+    fflush(stdout);
     return g_failures ? 1 : 0;
 }

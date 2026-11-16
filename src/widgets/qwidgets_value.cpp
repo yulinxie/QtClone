@@ -1684,3 +1684,6 @@ QTC_REGISTER_WIDGET(QSpinBox, "Input", "Spin Box", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QDoubleSpinBox, "Input", "Double Spin Box", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QComboBox, "Input", "Combo Box", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QGroupBox, "Containers", "Group Box", "<qtc/QtWidgets.h>")
+
+// Keeps this translation unit linked when the framework is a static library.
+void qtcWidgetAnchor_value() {}

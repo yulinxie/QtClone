@@ -725,3 +725,6 @@ QTC_REGISTER_WIDGET(QPushButton, "Buttons", "Push Button", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QToolButton, "Buttons", "Tool Button", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QCheckBox, "Buttons", "Check Box", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QRadioButton, "Buttons", "Radio Button", "<qtc/QtWidgets.h>")
+
+// Keeps this translation unit linked when the framework is a static library.
+void qtcWidgetAnchor_basic() {}

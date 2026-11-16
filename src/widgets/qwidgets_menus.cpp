@@ -980,3 +980,6 @@ QTC_REGISTER_WIDGET(QMenuBar, "Menus", "Menu Bar", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QToolBar, "Menus", "Tool Bar", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QStatusBar, "Menus", "Status Bar", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QMainWindow, "Containers", "Main Window", "<qtc/QtWidgets.h>")
+
+// Keeps this translation unit linked when the framework is a static library.
+void qtcWidgetAnchor_menus() {}

@@ -150,8 +150,10 @@ void QTheme::setMode(Mode mode) {
 // ---------------------------------------------------------------------------
 Qt::Orientations QSizePolicy::expandingDirections() const {
     Qt::Orientations result = 0;
-    if (h_ & Expanding) result = result | Qt::Horizontal;
-    if (v_ & Expanding) result = result | Qt::Vertical;
+    // Preferred carries the grow flag (5 & 7 != 0) but must not be treated as
+    // expanding; only Expanding/MinimumExpanding may claim the surplus first.
+    if (h_ == Expanding || h_ == MinimumExpanding) result = result | Qt::Horizontal;
+    if (v_ == Expanding || v_ == MinimumExpanding) result = result | Qt::Vertical;
     return result;
 }
 
@@ -216,8 +218,11 @@ QWidget::~QWidget() {
     if (d_->ownerWindow) {
         if (d_->ownerWindow->hover == this) d_->ownerWindow->hover = 0;
     }
-    delete d_->layout;
+    // Null the pointer before deleting: QLayout's destructor calls
+    // setLayout(0) on its parent, which would otherwise delete it again.
+    QLayout* layout = d_->layout;
     d_->layout = 0;
+    delete layout;
     // children are deleted by QObject's destructor; detach them from the window first
     for (int i = 0; i < d_->children.count(); ++i) {
         QWidget* child = d_->children[i];
@@ -436,11 +441,15 @@ void QWidget::show() {
     }
     QShowEvent ev;
     event(&ev);
-    if (d_->layout) d_->layout->activate();
     for (int i = 0; i < d_->children.count(); ++i) {
         QWidget* child = d_->children[i];
         if (child->d_func()->explicitHide) continue;
         if (!child->d_func()->visible) child->show();
+    }
+    // Children are visible now, so the layout no longer skips them.
+    if (d_->layout) {
+        d_->layout->invalidate();
+        d_->layout->activate();
     }
 }
 
@@ -1108,7 +1117,32 @@ void QWidgetFactory::registerClass(const QWidgetClassInfo& info) {
     r.sorted = false;
 }
 
+extern void qtcWidgetAnchor_basic();
+extern void qtcWidgetAnchor_value();
+extern void qtcWidgetAnchor_containers();
+extern void qtcWidgetAnchor_views();
+extern void qtcWidgetAnchor_menus();
+extern void qtcWidgetAnchor_dialogs();
+extern void qtcWidgetAnchor_textedit();
+
+static void qtcLinkWidgetObjects() {
+    static bool linked = false;
+    if (linked) return;
+    linked = true;
+    // Referencing one symbol per translation unit keeps the object file (and
+    // therefore its static widget registrars) in the final binary even when
+    // the framework is consumed as a static library.
+    qtcWidgetAnchor_basic();
+    qtcWidgetAnchor_value();
+    qtcWidgetAnchor_containers();
+    qtcWidgetAnchor_views();
+    qtcWidgetAnchor_menus();
+    qtcWidgetAnchor_dialogs();
+    qtcWidgetAnchor_textedit();
+}
+
 QList<QWidgetClassInfo> QWidgetFactory::classes() {
+    qtcLinkWidgetObjects();
     return registry().classes;
 }
 
@@ -1124,6 +1158,7 @@ bool QWidgetFactory::isRegistered(const char* className) {
 }
 
 QWidget* QWidgetFactory::create(const char* className) {
+    qtcLinkWidgetObjects();
     const QWidgetClassInfo* info = classInfo(className);
     if (!info || !info->create) return 0;
     return info->create();

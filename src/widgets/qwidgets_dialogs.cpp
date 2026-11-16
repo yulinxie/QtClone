@@ -685,3 +685,6 @@ void QToolTip::showText(const QPoint& pos, const QString& text, QWidget*, int) {
 void QToolTip::hideText() { if (toolTipWindow()->isVisible()) toolTipWindow()->hide(); }
 bool QToolTip::isVisible() { return toolTipWindow()->isVisible(); }
 QString QToolTip::text() { return toolTipWindow()->text(); }
+
+// Keeps this translation unit linked when the framework is a static library.
+void qtcWidgetAnchor_dialogs() {}

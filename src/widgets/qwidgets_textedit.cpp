@@ -683,3 +683,6 @@ void QTextEdit::resizeEvent(QResizeEvent* event) {
 QSize QTextEdit::sizeHint() const { return QSize(320, 180); }
 
 QTC_REGISTER_WIDGET(QTextEdit, "Input", "Text Edit", "<qtc/QtWidgets.h>")
+
+// Keeps this translation unit linked when the framework is a static library.
+void qtcWidgetAnchor_textedit() {}

@@ -87,20 +87,27 @@ echo [5/7] building and running smoke tests ...
 cl %CFLAGS% /c "%ROOT%\tests\smoke.cpp" /Fo"%OBJ%\smoke.obj" >> "%LOG%" 2>&1 || (echo smoke compile FAILED & exit /b 1)
 link /nologo /out:"%OUT%\wf_smoke.exe" "%OBJ%\smoke.obj" "%OBJ%\uicgen.obj" "%OUT%\wf.lib" %LIBS% >> "%LOG%" 2>&1 || (echo smoke link FAILED & exit /b 1)
 "%OUT%\wf_smoke.exe" > "%OUT%\smoke.log" 2>&1
-if errorlevel 1 (
-    echo smoke tests FAILED - see %OUT%\smoke.log
-    type "%OUT%\smoke.log"
-    exit /b 1
-)
+REM check both: exit 1 (assertion failure) and negative codes (crash / stack overflow)
+if errorlevel 1 goto smoke_failed
+if not errorlevel 0 goto smoke_failed
+goto smoke_passed
+:smoke_failed
+echo smoke tests FAILED - see %OUT%\smoke.log
+type "%OUT%\smoke.log"
+exit /b 1
+:smoke_passed
 echo       smoke tests passed
 
 echo [6/7] running designer self test ...
 "%OUT%\wfdesigner.exe" --selftest > "%OUT%\designer_selftest.log" 2>&1
-if errorlevel 1 (
-    echo designer self test FAILED - see %OUT%\designer_selftest.log
-    type "%OUT%\designer_selftest.log"
-    exit /b 1
-)
+if errorlevel 1 goto designer_failed
+if not errorlevel 0 goto designer_failed
+goto designer_passed
+:designer_failed
+echo designer self test FAILED - see %OUT%\designer_selftest.log
+type "%OUT%\designer_selftest.log"
+exit /b 1
+:designer_passed
 echo       designer self test passed
 
 echo [7/7] building the .ui example and screenshots ...

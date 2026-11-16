@@ -65,6 +65,7 @@ private:
         radio1->setChecked(true);
         bl->addWidget(radio1);
         bl->addWidget(radio2);
+        bl->addStretch(1);
         topRow->addWidget(buttonBox, 1);
 
         // inputs
@@ -98,6 +99,7 @@ private:
         progress->setRange(0, 100);
         progress->setValue(45);
         il->addWidget(progress);
+        il->addStretch(1);
         topRow->addWidget(inputBox, 1);
 
         // text / notes
@@ -108,9 +110,11 @@ private:
         QLabel* wrapped = new QLabel(L"这是一个会自动换行的标签。The quick brown fox jumps over the lazy dog, "
                                      L"用来验证 QLabel 的 wordWrap 与对齐行为。");
         wrapped->setWordWrap(true);
+        wrapped->setMinimumSize(QSize(0, 96));
         tl->addWidget(wrapped);
         QLabel* centered = new QLabel(L"居中对齐 / centered");
         centered->setAlignment(Qt::AlignCenter);
+        centered->setMinimumSize(QSize(0, 40));
         tl->addWidget(centered);
         QTextEdit* notes = new QTextEdit();
         notes->setPlainText(L"多行文本编辑器：\n自动换行、选区、撤销/重做、\n剪贴板与输入法。");
@@ -161,6 +165,7 @@ private:
         QVBoxLayout* sl = new QVBoxLayout(side);
         sl->setContentsMargins(12, 12, 12, 12);
         QLabel* treeTitle = new QLabel(L"目录树 / Tree");
+        treeTitle->setMinimumSize(QSize(0, 24));
         QFont f = treeTitle->font();
         f.setBold(true);
         treeTitle->setFont(f);

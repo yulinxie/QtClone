@@ -41,7 +41,36 @@ void distribute(int total, int count, const int* mins, const int* hints, const i
             if (w <= 0 && expanding && expanding[i]) w = 1;
             weightTotal += w > 0 ? w : 0;
         }
-        if (weightTotal > 0) {
+        if (weightTotal == 0) {
+            // Qt semantics: items that may grow (Preferred and friends) also
+            // absorb surplus space, clamped by their maximum size.
+            int rest = extra;
+            int guard = 0;
+            while (rest > 0 && guard++ < 64) {
+                int eligible = 0;
+                for (int i = 0; i < count; ++i) {
+                    int mx = maxs ? maxs[i] : 0x7fffffff;
+                    if (mx <= 0) mx = 0x7fffffff;
+                    if (s[(size_t)i] < mx) ++eligible;
+                }
+                if (eligible == 0) break;
+                int share = rest / eligible;
+                if (share <= 0) share = 1;
+                int given = 0;
+                for (int i = 0; i < count && rest > 0; ++i) {
+                    int mx = maxs ? maxs[i] : 0x7fffffff;
+                    if (mx <= 0) mx = 0x7fffffff;
+                    if (s[(size_t)i] >= mx) continue;
+                    int add = share;
+                    if (add > mx - s[(size_t)i]) add = mx - s[(size_t)i];
+                    if (add > rest) add = rest;
+                    s[(size_t)i] += add;
+                    rest -= add;
+                    given += add;
+                }
+                if (given == 0) break;
+            }
+        } else if (weightTotal > 0) {
             int given = 0;
             for (int i = 0; i < count; ++i) {
                 int w = stretch ? stretch[i] : 0;
@@ -192,6 +221,11 @@ void QWidgetItem::setGeometry(const QRect& rect, Qt::Alignment alignment) {
         else if (alignment & Qt::AlignVCenter) r.setTop(rect.top() + (rect.height() - h) / 2);
         r.setBottom(r.top() + h - 1);
     }
+    // Respect the size policy: a Fixed-height widget must not be stretched
+    // just because the layout cell is taller.
+    QSize mx = maximumSize();
+    if (mx.width() > 0 && r.width() > mx.width()) r.setWidth(mx.width());
+    if (mx.height() > 0 && r.height() > mx.height()) r.setHeight(mx.height());
     widget_->setGeometry(r);
 }
 

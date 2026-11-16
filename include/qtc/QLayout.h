@@ -36,7 +36,8 @@ public:
     Qt::Orientations expandingDirections() const { return expanding_; }
     void setGeometry(const QRect& rect) { rect_ = rect; }
     QRect geometry() const { return rect_; }
-    bool isEmpty() const { return true; }
+    // A spacer occupies layout space; only widgets can be "empty" (hidden).
+    bool isEmpty() const { return false; }
     void changeSize(int w, int h, QSizePolicy::Policy hPolicy = QSizePolicy::Minimum,
                     QSizePolicy::Policy vPolicy = QSizePolicy::Minimum);
 private:

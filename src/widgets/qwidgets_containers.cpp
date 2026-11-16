@@ -750,3 +750,6 @@ QTC_REGISTER_WIDGET(QTabWidget, "Containers", "Tab Widget", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QScrollArea, "Containers", "Scroll Area", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QSplitter, "Containers", "Splitter", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QStackedWidget, "Containers", "Stacked Widget", "<qtc/QtWidgets.h>")
+
+// Keeps this translation unit linked when the framework is a static library.
+void qtcWidgetAnchor_containers() {}

@@ -1041,3 +1041,6 @@ void QTableWidget::wheelEvent(QWheelEvent* event) {
 QTC_REGISTER_WIDGET(QListWidget, "Item Views", "List Widget", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QTreeWidget, "Item Views", "Tree Widget", "<qtc/QtWidgets.h>")
 QTC_REGISTER_WIDGET(QTableWidget, "Item Views", "Table Widget", "<qtc/QtWidgets.h>")
+
+// Keeps this translation unit linked when the framework is a static library.
+void qtcWidgetAnchor_views() {}

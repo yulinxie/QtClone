@@ -79,10 +79,21 @@ const EnumDef* findEnum(const QString& name) {
     return 0;
 }
 
+QWidget* findWidgetByName(QWidget* root, const QString& name) {
+    if (!root) return 0;
+    QList<QWidget*> children = root->childrenWidgets();
+    for (int i = 0; i < children.count(); ++i) {
+        if (children[i]->objectName() == name) return children[i];
+        QWidget* deeper = findWidgetByName(children[i], name);
+        if (deeper) return deeper;
+    }
+    return 0;
+}
+
 QString uniqueName(QWidget* form, const QString& base) {
     for (int index = 1;; ++index) {
         QString candidate = base + QString::number(index);
-        if (!form->findChild<QWidget>(candidate)) return candidate;
+        if (!findWidgetByName(form, candidate)) return candidate;
     }
 }
 
@@ -387,6 +398,8 @@ public:
 
     QWidget* form() const { return form_; }
     QWidget* selected() const { return selected_; }
+    QList<QWidget*> selection() const { return selection_; }
+    void setSelectionList(const QList<QWidget*>& widgets);
     bool gridVisible() const { return grid_; }
     void setGridVisible(bool visible) { grid_ = visible; update(); }
 
@@ -394,6 +407,10 @@ public:
     void select(QWidget* widget, bool notify = true);
     void deleteSelected();
     void duplicateSelected();
+    void selectAll();
+    void alignSelection(int mode);
+    void distributeSelection(bool horizontal);
+    enum AlignMode { AlignLeft, AlignRight, AlignTop, AlignBottom, AlignCenterH, AlignCenterV };
     void centerSelected(bool horizontal) { centerSelection(horizontal); }
     void raiseSelected();
     void lowerSelected();
@@ -419,7 +436,7 @@ protected:
     void leaveEvent(QEvent* event);
 
 private:
-    enum Mode { Idle, Moving, Resizing };
+    enum Mode { Idle, Moving, Resizing, Rubber };
     QRect handlesRect(QList<QRect>* handles) const;
     int handleAt(const QPoint& pos) const;
     QWidget* widgetAt(const QPoint& pos, QWidget* root) const;
@@ -428,6 +445,10 @@ private:
     void showContextMenu(const QPoint& globalPos);
     void centerSelection(bool horizontal);
     void cycleSelection(int step);
+    bool isSelected(QWidget* widget) const;
+    void toggleSelection(QWidget* widget);
+    void applySelectionMove(const QPoint& delta);
+    void finishRubberBand(const QRect& band, bool additive);
     static Qt::CursorShape cursorForHandle(int handle);
 
     friend class SelectionOverlay;
@@ -435,6 +456,11 @@ private:
     DesignerDocument* doc_;
     QWidget* form_;
     QWidget* selected_;
+    QList<QWidget*> selection_;
+    QList<QWidget*> dragWidgets_;
+    QList<QRect> dragStarts_;
+    QRect bandRect_;
+    bool bandAdditive_;
     QWidget* hover_;
     SelectionOverlay* overlay_;
     QMenu* contextMenu_;
@@ -450,6 +476,8 @@ private:
 DesignerCanvas::DesignerCanvas(DesignerDocument* doc)
     : QWidget(0), doc_(doc), form_(0), selected_(0), hover_(0), overlay_(0), contextMenu_(0),
       menuRelay_(0), hoverHandle_(-1), grid_(true), mode_(Idle), handle_(-1) {
+    bandRect_ = QRect();
+    bandAdditive_ = false;
     setFocusPolicy(Qt::StrongFocus);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     form_ = new DesignerFormWidget(this);
@@ -473,6 +501,13 @@ DesignerCanvas::DesignerCanvas(DesignerDocument* doc)
         else if (index == 4) lowerSelected();
         else if (index == 6) centerSelection(true);
         else if (index == 7) centerSelection(false);
+        else if (index == 9) alignSelection(AlignLeft);
+        else if (index == 10) alignSelection(AlignRight);
+        else if (index == 11) alignSelection(AlignTop);
+        else if (index == 12) alignSelection(AlignBottom);
+        else if (index == 14) distributeSelection(true);
+        else if (index == 15) distributeSelection(false);
+        else if (index == 17) selectAll();
         contextMenu_->hide();
         setFocus(Qt::MouseFocusReason);
     };
@@ -573,54 +608,88 @@ int DesignerCanvas::handleAt(const QPoint& pos) const {
     return -1;
 }
 
+void DesignerCanvas::setSelectionList(const QList<QWidget*>& widgets) {
+    selection_ = widgets;
+    selected_ = widgets.isEmpty() ? 0 : widgets.last();
+    updateAdornments();
+    update();
+    selectionChanged(selected_);
+}
+
+bool DesignerCanvas::isSelected(QWidget* widget) const {
+    return widget && selection_.indexOf(widget) >= 0;
+}
+
+void DesignerCanvas::toggleSelection(QWidget* widget) {
+    if (!widget) return;
+    QList<QWidget*> list = selection_;
+    if (list.indexOf(widget) >= 0) list.removeAll(widget);
+    else list.append(widget);
+    setSelectionList(list);
+}
+
 void DesignerCanvas::select(QWidget* widget, bool notify) {
-    if (selected_ == widget) return;
+    QList<QWidget*> list;
+    if (widget) list.append(widget);
+    selection_ = list;
     selected_ = widget;
     updateAdornments();
     update();
     if (notify) selectionChanged(selected_);
 }
 
+void DesignerCanvas::selectAll() {
+    setSelectionList(form_->childrenWidgets());
+}
+
 void DesignerCanvas::deleteSelected() {
-    if (!selected_) return;
-    QWidget* victim = selected_;
-    select(0, true);
-    victim->setParentWidget(0);
-    delete victim;
+    if (selection_.isEmpty()) return;
+    QList<QWidget*> victims = selection_;
+    selection_.clear();
+    selected_ = 0;
+    for (int i = 0; i < victims.count(); ++i) {
+        victims[i]->setParentWidget(0);
+        delete victims[i];
+    }
     captureToDocument();
+    updateAdornments();
     update();
+    selectionChanged(0);
 }
 
 void DesignerCanvas::duplicateSelected() {
-    if (!selected_) return;
-    QString xml = captureWidgetXml(selected_);
-    QXmlNode* node = QXmlNode::parse(xml, 0);
-    if (!node) return;
-    QWidget* copy = buildWidgetTree(node, form_);
-    delete node;
-    if (!copy) return;
-    copy->setObjectName(uniqueName(form_, QString(copy->className()).toLower()));
-    QRect g = selected_->geometry();
-    copy->setGeometry(g.translated(16, 16));
-    copy->show();
-    select(copy, true);
+    if (selection_.isEmpty()) return;
+    QList<QWidget*> sources = selection_;
+    QList<QWidget*> copies;
+    for (int i = 0; i < sources.count(); ++i) {
+        QString xml = captureWidgetXml(sources[i]);
+        QXmlNode* node = QXmlNode::parse(xml, 0);
+        if (!node) continue;
+        QWidget* copy = buildWidgetTree(node, form_);
+        delete node;
+        if (!copy) continue;
+        copy->setObjectName(uniqueName(form_, QString(copy->className()).toLower()));
+        copy->setGeometry(sources[i]->geometry().translated(16, 16));
+        copy->show();
+        copies.append(copy);
+    }
+    if (copies.isEmpty()) return;
+    setSelectionList(copies);
     captureToDocument();
 }
 
 void DesignerCanvas::raiseSelected() {
-    if (selected_) {
-        selected_->raise();
-        captureToDocument();
-        update();
-    }
+    if (selection_.isEmpty()) return;
+    for (int i = 0; i < selection_.count(); ++i) selection_[i]->raise();
+    captureToDocument();
+    update();
 }
 
 void DesignerCanvas::lowerSelected() {
-    if (selected_) {
-        selected_->lower();
-        captureToDocument();
-        update();
-    }
+    if (selection_.isEmpty()) return;
+    for (int i = 0; i < selection_.count(); ++i) selection_[i]->lower();
+    captureToDocument();
+    update();
 }
 
 void DesignerCanvas::captureToDocument() {
@@ -679,24 +748,31 @@ void DesignerCanvas::paintEvent(QPaintEvent*) {
 }
 
 void DesignerCanvas::paintAdornments(QPainter& p) {
-    if (hover_ && hover_ != selected_) {
+    if (hover_ && !isSelected(hover_)) {
         QRect h = hover_->geometry().translated(form_->pos());
         p.setPen(QPen(QColor(0x00, 0x78, 0xD4, 120), 1, Qt::DashLine));
         p.setBrush(Qt::NoBrush);
         p.drawRect(h);
     }
 
-    if (selected_) {
-        QList<QRect> handles;
-        QRect r = handlesRect(&handles);
-        p.setPen(QPen(QTheme::colors().accent, 1));
+    if (!bandRect_.isNull()) {
+        p.setPen(QPen(QTheme::colors().accent, 1, Qt::DashLine));
+        p.setBrush(QBrush(QColor(0x00, 0x78, 0xD4, 24)));
+        p.drawRect(bandRect_);
+    }
+
+    bool single = selection_.count() == 1;
+    for (int i = 0; i < selection_.count(); ++i) {
+        QRect r = selection_[i]->geometry().translated(form_->pos());
+        p.setPen(QPen(QTheme::colors().accent, i + 1 == selection_.count() ? 1 : 1));
         p.setBrush(Qt::NoBrush);
         p.drawRect(r);
-
-
-        p.setBrush(QBrush(QColor(0xFF, 0xFF, 0xFF)));
-        p.setPen(QPen(QTheme::colors().accent, 1));
-        for (int i = 0; i < handles.count(); ++i) p.drawRect(handles[i]);
+        if (single) {
+            QList<QRect> handles;
+            handlesRect(&handles);
+            p.setBrush(QBrush(QColor(0xFF, 0xFF, 0xFF)));
+            for (int h = 0; h < handles.count(); ++h) p.drawRect(handles[h]);
+        }
     }
 }
 
@@ -746,13 +822,100 @@ void DesignerCanvas::cycleSelection(int step) {
 }
 
 void DesignerCanvas::centerSelection(bool horizontal) {
-    if (!selected_) return;
-    QRect g = selected_->geometry();
-    if (horizontal) g.moveLeft(qMax(0, (form_->width() - g.width()) / 2));
-    else g.moveTop(qMax(0, (form_->height() - g.height()) / 2));
-    selected_->setGeometry(g);
+    if (selection_.isEmpty()) return;
+    QRect bounds;
+    for (int i = 0; i < selection_.count(); ++i)
+        bounds = bounds.isNull() ? selection_[i]->geometry()
+                                 : bounds.united(selection_[i]->geometry());
+    int dx = 0, dy = 0;
+    if (horizontal) dx = (form_->width() - bounds.width()) / 2 - bounds.left();
+    else dy = (form_->height() - bounds.height()) / 2 - bounds.top();
+    if (dx == 0 && dy == 0) return;
+    for (int i = 0; i < selection_.count(); ++i) {
+        QRect g = selection_[i]->geometry();
+        selection_[i]->setGeometry(g.translated(dx, dy));
+    }
     captureToDocument();
+    updateAdornments();
     update();
+}
+
+void DesignerCanvas::applySelectionMove(const QPoint& delta) {
+    if (delta.isNull()) return;
+    for (int i = 0; i < dragWidgets_.count(); ++i)
+        dragWidgets_[i]->setGeometry(dragStarts_[i].translated(delta));
+}
+
+void DesignerCanvas::alignSelection(int mode) {
+    if (selection_.count() < 2) return;
+    QRect bounds;
+    for (int i = 0; i < selection_.count(); ++i)
+        bounds = bounds.isNull() ? selection_[i]->geometry()
+                                 : bounds.united(selection_[i]->geometry());
+    for (int i = 0; i < selection_.count(); ++i) {
+        QRect g = selection_[i]->geometry();
+        switch (mode) {
+        case AlignLeft: g.moveLeft(bounds.left()); break;
+        case AlignRight: g.moveLeft(bounds.right() - g.width() + 1); break;
+        case AlignTop: g.moveTop(bounds.top()); break;
+        case AlignBottom: g.moveTop(bounds.bottom() - g.height() + 1); break;
+        case AlignCenterH: g.moveLeft(bounds.center().x() - g.width() / 2); break;
+        case AlignCenterV: g.moveTop(bounds.center().y() - g.height() / 2); break;
+        default: break;
+        }
+        selection_[i]->setGeometry(g);
+    }
+    captureToDocument();
+    updateAdornments();
+    update();
+}
+
+void DesignerCanvas::distributeSelection(bool horizontal) {
+    if (selection_.count() < 3) return;
+    QList<QWidget*> items = selection_;
+    // insertion sort by leading edge
+    for (int i = 1; i < items.count(); ++i) {
+        QWidget* key = items[i];
+        int keyEdge = horizontal ? key->geometry().left() : key->geometry().top();
+        int j = i - 1;
+        while (j >= 0) {
+            int edge = horizontal ? items[j]->geometry().left() : items[j]->geometry().top();
+            if (edge <= keyEdge) break;
+            items[j + 1] = items[j];
+            --j;
+        }
+        items[j + 1] = key;
+    }
+    int first = horizontal ? items.first()->geometry().left() : items.first()->geometry().top();
+    QWidget* lastItem = items.last();
+    int lastEdge = horizontal ? (lastItem->geometry().right() + 1) : (lastItem->geometry().bottom() + 1);
+    int total = 0;
+    for (int i = 0; i < items.count(); ++i)
+        total += horizontal ? items[i]->width() : items[i]->height();
+    int gap = (lastEdge - first - total) / (items.count() - 1);
+    int cursor = first;
+    for (int i = 0; i < items.count(); ++i) {
+        QRect g = items[i]->geometry();
+        if (horizontal) g.moveLeft(cursor);
+        else g.moveTop(cursor);
+        items[i]->setGeometry(g);
+        cursor += (horizontal ? g.width() : g.height()) + gap;
+    }
+    captureToDocument();
+    updateAdornments();
+    update();
+}
+
+void DesignerCanvas::finishRubberBand(const QRect& band, bool additive) {
+    QList<QWidget*> picked;
+    if (additive) picked = selection_;
+    QList<QWidget*> children = form_->childrenWidgets();
+    for (int i = 0; i < children.count(); ++i) {
+        QRect r = children[i]->geometry().translated(form_->pos());
+        if (!band.intersects(r)) continue;
+        if (picked.indexOf(children[i]) < 0) picked.append(children[i]);
+    }
+    setSelectionList(picked);
 }
 
 void DesignerCanvas::showContextMenu(const QPoint& globalPos) {
@@ -765,6 +928,16 @@ void DesignerCanvas::showContextMenu(const QPoint& globalPos) {
     contextMenu_->addSeparator();
     contextMenu_->addAction(QString(L"\u6c34\u5e73\u5c45\u4e2d"));
     contextMenu_->addAction(QString(L"\u5782\u76f4\u5c45\u4e2d"));
+    contextMenu_->addSeparator();
+    contextMenu_->addAction(QString(L"\u5de6\u5bf9\u9f50"));
+    contextMenu_->addAction(QString(L"\u53f3\u5bf9\u9f50"));
+    contextMenu_->addAction(QString(L"\u9876\u5bf9\u9f50"));
+    contextMenu_->addAction(QString(L"\u5e95\u5bf9\u9f50"));
+    contextMenu_->addSeparator();
+    contextMenu_->addAction(QString(L"\u6c34\u5e73\u5206\u5e03"));
+    contextMenu_->addAction(QString(L"\u5782\u76f4\u5206\u5e03"));
+    contextMenu_->addSeparator();
+    contextMenu_->addAction(QString(L"\u5168\u9009"));
     contextMenu_->popup(globalPos);
 }
 
@@ -772,14 +945,19 @@ void DesignerCanvas::mousePressEvent(QMouseEvent* event) {
     if (contextMenu_ && contextMenu_->isVisible() && event->button() == Qt::LeftButton)
         contextMenu_->hide();
     setFocus(Qt::MouseFocusReason);
+
     if (event->button() == Qt::RightButton) {
         QWidget* hit = widgetAt(event->pos() - form_->pos(), form_);
-        select(hit);
+        if (hit && !isSelected(hit)) select(hit);
         showContextMenu(event->globalPos());
         return;
     }
     if (event->button() != Qt::LeftButton) return;
-    int handle = selected_ ? handleAt(event->pos()) : -1;
+
+    bool ctrl = (event->modifiers() & Qt::ControlModifier) != 0;
+    bool shift = (event->modifiers() & Qt::ShiftModifier) != 0;
+
+    int handle = (selection_.count() == 1 && selected_) ? handleAt(event->pos()) : -1;
     if (handle >= 0) {
         mode_ = Resizing;
         handle_ = handle;
@@ -787,18 +965,38 @@ void DesignerCanvas::mousePressEvent(QMouseEvent* event) {
         startGeometry_ = selected_->geometry();
         return;
     }
-    QPoint local = event->pos() - form_->pos();
-    QWidget* hit = widgetAt(local, form_);
-    if (hit) {
-        select(hit);
-        mode_ = Moving;
-        handle_ = -1;
+
+    QWidget* hit = widgetAt(event->pos() - form_->pos(), form_);
+    if (!hit) {
+        if (!ctrl && !shift) select(0, true);
+        bandAdditive_ = shift;
+        mode_ = Rubber;
         dragStart_ = event->pos();
-        startGeometry_ = hit->geometry();
-    } else {
-        select(0);
-        mode_ = Idle;
+        bandRect_ = QRect(dragStart_, dragStart_);
+        updateAdornments();
+        return;
     }
+
+    if (ctrl) {
+        toggleSelection(hit);
+        mode_ = Idle;
+        return;
+    }
+    if (shift && !isSelected(hit)) {
+        QList<QWidget*> list = selection_;
+        list.append(hit);
+        setSelectionList(list);
+    } else if (!isSelected(hit)) {
+        select(hit, true);
+    }
+
+    dragWidgets_ = selection_;
+    dragStarts_.clearAll();
+    for (int i = 0; i < dragWidgets_.count(); ++i)
+        dragStarts_.append(dragWidgets_[i]->geometry());
+    mode_ = Moving;
+    handle_ = -1;
+    dragStart_ = event->pos();
 }
 
 void DesignerCanvas::mouseMoveEvent(QMouseEvent* event) {
@@ -806,33 +1004,46 @@ void DesignerCanvas::mouseMoveEvent(QMouseEvent* event) {
         updateHover(event->pos());
         return;
     }
-    if (!selected_) return;
+    if (mode_ == Rubber) {
+        bandRect_ = QRect(dragStart_, event->pos()).normalized();
+        updateAdornments();
+        return;
+    }
+    if (selection_.isEmpty()) return;
+
     QPoint delta = event->pos() - dragStart_;
     if (mode_ == Moving) {
-        QPoint target = startGeometry_.topLeft() + delta;
-        target = snapPoint(target);
-        int maxX = qMax(0, form_->width() - startGeometry_.width());
-        int maxY = qMax(0, form_->height() - startGeometry_.height());
-        target.setX(qBound(0, target.x(), maxX));
-        target.setY(qBound(0, target.y(), maxY));
-        selected_->move(target);
+        int index = dragWidgets_.indexOf(selected_);
+        QRect primaryStart = index >= 0 ? dragStarts_[index] : dragStarts_.first();
+        QPoint target = snapPoint(primaryStart.topLeft() + delta);
+        QPoint move = target - primaryStart.topLeft();
+
+        int minLeft = 1 << 30, minTop = 1 << 30, maxRight = -1, maxBottom = -1;
+        for (int i = 0; i < dragStarts_.count(); ++i) {
+            minLeft = qMin(minLeft, dragStarts_[i].left());
+            minTop = qMin(minTop, dragStarts_[i].top());
+            maxRight = qMax(maxRight, dragStarts_[i].right());
+            maxBottom = qMax(maxBottom, dragStarts_[i].bottom());
+        }
+        move.setX(qBound(-minLeft, move.x(), qMax(-minLeft, form_->width() - 1 - maxRight)));
+        move.setY(qBound(-minTop, move.y(), qMax(-minTop, form_->height() - 1 - maxBottom)));
+        applySelectionMove(move);
     } else if (mode_ == Resizing) {
         QRect g = startGeometry_;
-        QPoint delta = snapPoint(startGeometry_.topLeft() + (event->pos() - dragStart_)) - startGeometry_.topLeft();
-        int minW = 16, minH = 16;
+        QPoint snapped = snapPoint(startGeometry_.topLeft() + delta) - startGeometry_.topLeft();
         switch (handle_) {
-        case 0: g.setTopLeft(g.topLeft() + delta); break;
-        case 1: g.setTop(g.top() + delta.y()); break;
-        case 2: g.setTopRight(g.topRight() + delta); break;
-        case 3: g.setLeft(g.left() + delta.x()); break;
-        case 4: g.setRight(g.right() + delta.x()); break;
-        case 5: g.setBottomLeft(g.bottomLeft() + delta); break;
-        case 6: g.setBottom(g.bottom() + delta.y()); break;
-        case 7: g.setBottomRight(g.bottomRight() + delta); break;
+        case 0: g.setTopLeft(g.topLeft() + snapped); break;
+        case 1: g.setTop(g.top() + snapped.y()); break;
+        case 2: g.setTopRight(g.topRight() + snapped); break;
+        case 3: g.setLeft(g.left() + snapped.x()); break;
+        case 4: g.setRight(g.right() + snapped.x()); break;
+        case 5: g.setBottomLeft(g.bottomLeft() + snapped); break;
+        case 6: g.setBottom(g.bottom() + snapped.y()); break;
+        case 7: g.setBottomRight(g.bottomRight() + snapped); break;
         default: break;
         }
-        int needW = qMax(minW, selected_->minimumSize().width());
-        int needH = qMax(minH, selected_->minimumSize().height());
+        int needW = qMax(16, selected_->minimumSize().width());
+        int needH = qMax(16, selected_->minimumSize().height());
         if (g.width() < needW) {
             if (handle_ == 0 || handle_ == 3 || handle_ == 5) g.setLeft(g.right() - needW + 1);
             else g.setRight(g.left() + needW - 1);
@@ -851,10 +1062,18 @@ void DesignerCanvas::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void DesignerCanvas::mouseReleaseEvent(QMouseEvent*) {
+    if (mode_ == Rubber) {
+        QRect band = bandRect_;
+        mode_ = Idle;
+        bandRect_ = QRect();
+        finishRubberBand(band, bandAdditive_);
+        updateAdornments();
+        return;
+    }
     if (mode_ != Idle) {
         mode_ = Idle;
         handle_ = -1;
-        if (selected_) captureToDocument();
+        if (!selection_.isEmpty()) captureToDocument();
     }
 }
 
@@ -876,24 +1095,32 @@ void DesignerCanvas::keyPressEvent(QKeyEvent* event) {
         cycleSelection((event->modifiers() & Qt::ShiftModifier) ? -1 : 1);
         return;
     }
-    if (!selected_) {
+    if (selection_.isEmpty()) {
         QWidget::keyPressEvent(event);
         return;
     }
     int step = (event->modifiers() & Qt::ShiftModifier) ? 8 : 1;
-    QRect g = selected_->geometry();
+    int dx = 0, dy = 0;
     switch (event->key()) {
-    case Qt::Key_Left: g.translate(-step, 0); break;
-    case Qt::Key_Right: g.translate(step, 0); break;
-    case Qt::Key_Up: g.translate(0, -step); break;
-    case Qt::Key_Down: g.translate(0, step); break;
+    case Qt::Key_Left: dx = -step; break;
+    case Qt::Key_Right: dx = step; break;
+    case Qt::Key_Up: dy = -step; break;
+    case Qt::Key_Down: dy = step; break;
     case Qt::Key_Delete: deleteSelected(); return;
     default: QWidget::keyPressEvent(event); return;
     }
-    selected_->setGeometry(g);
+    for (int i = 0; i < selection_.count(); ++i) {
+        QRect g = selection_[i]->geometry();
+        QRect moved = g.translated(dx, dy);
+        if (moved.left() < 0 || moved.top() < 0 || moved.right() >= form_->width() ||
+            moved.bottom() >= form_->height())
+            continue;
+        selection_[i]->setGeometry(moved);
+    }
     captureToDocument();
     update();
 }
+
 
 void DesignerCanvas::resizeEvent(QResizeEvent* event) {
     if (overlay_) overlay_->setGeometry(rect());
@@ -1369,6 +1596,13 @@ private:
     void onFormSize();
     void onCenterH();
     void onCenterV();
+    void onSelectAll();
+    void onAlignLeft();
+    void onAlignRight();
+    void onAlignTop();
+    void onAlignBottom();
+    void onDistributeH();
+    void onDistributeV();
     void onRaise();
     void onLower();
     void renameWidget(QWidget* widget);
@@ -1445,6 +1679,24 @@ void DesignerWindow::buildMenus() {
     QObject::connect(frontAct, frontAct->triggered, this, &DesignerWindow::onRaise);
     QAction* backAct = edit->addAction(L"置于底层");
     QObject::connect(backAct, backAct->triggered, this, &DesignerWindow::onLower);
+    edit->addSeparator();
+    QAction* selectAllAct = edit->addAction(L"全选");
+    selectAllAct->setShortcut(L"Ctrl+A");
+    QObject::connect(selectAllAct, selectAllAct->triggered, this, &DesignerWindow::onSelectAll);
+    edit->addSeparator();
+    QAction* alignLeftAct = edit->addAction(L"左对齐");
+    QObject::connect(alignLeftAct, alignLeftAct->triggered, this, &DesignerWindow::onAlignLeft);
+    QAction* alignRightAct = edit->addAction(L"右对齐");
+    QObject::connect(alignRightAct, alignRightAct->triggered, this, &DesignerWindow::onAlignRight);
+    QAction* alignTopAct = edit->addAction(L"顶对齐");
+    QObject::connect(alignTopAct, alignTopAct->triggered, this, &DesignerWindow::onAlignTop);
+    QAction* alignBottomAct = edit->addAction(L"底对齐");
+    QObject::connect(alignBottomAct, alignBottomAct->triggered, this, &DesignerWindow::onAlignBottom);
+    edit->addSeparator();
+    QAction* distHAct = edit->addAction(L"水平分布");
+    QObject::connect(distHAct, distHAct->triggered, this, &DesignerWindow::onDistributeH);
+    QAction* distVAct = edit->addAction(L"垂直分布");
+    QObject::connect(distVAct, distVAct->triggered, this, &DesignerWindow::onDistributeV);
 
     QMenu* view = bar->addMenu(L"视图");
     QAction* gridAct = view->addAction(L"显示网格");
@@ -1542,7 +1794,7 @@ void DesignerWindow::buildUi() {
         QString name = contextObject_;
         QWidget* widget = (name == canvas_->form()->objectName())
                               ? canvas_->form()
-                              : canvas_->form()->findChild<QWidget>(name);
+                              : findWidgetByName(canvas_->form(), name);
         int index = objectMenu_->actions().indexOf(action);
         if (!widget) return;
         if (index == 0) {
@@ -1712,11 +1964,20 @@ void DesignerWindow::refreshProperties() {
 
 void DesignerWindow::onSelectionChanged(QWidget* widget) {
     refreshProperties();
-    if (!widget) {
+    QList<QWidget*> list = canvas_->selection();
+    if (list.isEmpty() || !widget) {
         setStatus(L"未选中任何控件");
         return;
     }
-    setStatus(L"已选中 " + widget->objectName() + L" (" + QString(widget->className()) + L")");
+    if (list.count() > 1) {
+        setStatus(QString::number(list.count()) +
+                  L" 个控件已选中（拖动整体移动，Ctrl+单击增减，框选空白处）");
+        return;
+    }
+    QRect g = widget->geometry();
+    setStatus(widget->objectName() + L"  " + QString(widget->className()) + L"  " +
+              QString::number(g.x()) + L"," + QString::number(g.y()) + L"  " +
+              QString::number(g.width()) + L" x " + QString::number(g.height()));
 }
 
 void DesignerWindow::onDocumentModified() {
@@ -1801,7 +2062,7 @@ void DesignerWindow::onTreeClicked(QTreeWidgetItem* item, int) {
         canvas_->select(0);
         return;
     }
-    QWidget* widget = canvas_->form()->findChild<QWidget>(name);
+    QWidget* widget = findWidgetByName(canvas_->form(), name);
     if (widget) canvas_->select(widget);
 }
 
@@ -1879,7 +2140,7 @@ void DesignerWindow::onWidgetActivated(QWidget* widget) {
 
 void DesignerWindow::onTreeDoubleClicked(QTreeWidgetItem* item, int) {
     if (!item) return;
-    QWidget* widget = canvas_->form()->findChild<QWidget>(item->text(0));
+    QWidget* widget = findWidgetByName(canvas_->form(), item->text(0));
     if (widget) renameWidget(widget);
 }
 
@@ -1891,7 +2152,7 @@ void DesignerWindow::renameWidget(QWidget* widget) {
     if (!ok) return;
     name = name.trimmed();
     if (name.isEmpty()) return;
-    if (canvas_->form()->findChild<QWidget>(name)) {
+    if (findWidgetByName(canvas_->form(), name)) {
         QMessageBox::warning(this, L"\u91cd\u547d\u540d", L"\u540d\u79f0\u5df2\u5b58\u5728");
         return;
     }
@@ -1940,6 +2201,36 @@ void DesignerWindow::onFormSize() {
 
 void DesignerWindow::onCenterH() { canvas_->centerSelected(true); }
 void DesignerWindow::onCenterV() { canvas_->centerSelected(false); }
+
+void DesignerWindow::onSelectAll() {
+    canvas_->selectAll();
+    refreshProperties();
+}
+
+void DesignerWindow::onAlignLeft() {
+    canvas_->alignSelection(DesignerCanvas::AlignLeft);
+    refreshProperties();
+}
+void DesignerWindow::onAlignRight() {
+    canvas_->alignSelection(DesignerCanvas::AlignRight);
+    refreshProperties();
+}
+void DesignerWindow::onAlignTop() {
+    canvas_->alignSelection(DesignerCanvas::AlignTop);
+    refreshProperties();
+}
+void DesignerWindow::onAlignBottom() {
+    canvas_->alignSelection(DesignerCanvas::AlignBottom);
+    refreshProperties();
+}
+void DesignerWindow::onDistributeH() {
+    canvas_->distributeSelection(true);
+    refreshProperties();
+}
+void DesignerWindow::onDistributeV() {
+    canvas_->distributeSelection(false);
+    refreshProperties();
+}
 void DesignerWindow::onRaise() { canvas_->raiseSelected(); }
 void DesignerWindow::onLower() { canvas_->lowerSelected(); }
 
@@ -2010,6 +2301,65 @@ int DesignerWindow::selfTest() {
     onRedo();
     int afterRedo = canvas_->form()->childrenWidgets().count();
     if (afterRedo != before - 1) { printf("FAIL: redo\n"); ++failures; }
+
+    // multi selection: unique names, align, distribute
+    newDocument();
+    QWidget* a = addWidgetAt(L"QPushButton", QPoint(80, 80));
+    QWidget* b = addWidgetAt(L"QPushButton", QPoint(260, 160));
+    if (!a || !b) {
+        printf("FAIL: multi add\n");
+        ++failures;
+    } else {
+        if (a->objectName() == b->objectName()) {
+            printf("FAIL: duplicate object names\n");
+            ++failures;
+        }
+        a->setGeometry(QRect(10, 10, 100, 32));
+        b->setGeometry(QRect(200, 60, 100, 32));
+        QList<QWidget*> both;
+        both.append(a);
+        both.append(b);
+        canvas_->setSelectionList(both);
+        canvas_->alignSelection(DesignerCanvas::AlignTop);
+        if (a->y() != b->y()) {
+            printf("FAIL: align top (%d vs %d)\n", a->y(), b->y());
+            ++failures;
+        }
+        canvas_->alignSelection(DesignerCanvas::AlignLeft);
+        if (a->x() != b->x()) {
+            printf("FAIL: align left (%d vs %d)\n", a->x(), b->x());
+            ++failures;
+        }
+
+        QWidget* c = addWidgetAt(L"QPushButton", QPoint(420, 280));
+        if (c) {
+            a->setGeometry(QRect(10, 10, 60, 32));
+            b->setGeometry(QRect(150, 10, 60, 32));
+            c->setGeometry(QRect(400, 10, 60, 32));
+            QList<QWidget*> three;
+            three.append(a);
+            three.append(b);
+            three.append(c);
+            canvas_->setSelectionList(three);
+            canvas_->distributeSelection(true);
+            int gap1 = b->x() - (a->x() + a->width());
+            int gap2 = c->x() - (b->x() + b->width());
+            if (gap1 != gap2) {
+                printf("FAIL: distribute (%d vs %d)\n", gap1, gap2);
+                ++failures;
+            }
+            QList<QWidget*> allThree;
+            allThree.append(a);
+            allThree.append(b);
+            allThree.append(c);
+            canvas_->setSelectionList(allThree);
+            canvas_->deleteSelected();
+            if (canvas_->form()->childrenWidgets().count() != 0) {
+                printf("FAIL: multi delete\n");
+                ++failures;
+            }
+        }
+    }
 
     printf("designer selftest: %s (%d failures)\n", failures ? "FAILED" : "PASSED", failures);
     return failures;

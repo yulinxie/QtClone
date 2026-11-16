@@ -376,6 +376,20 @@ protected:
 class DesignerCanvas;
 
 // ---------------------------------------------------------------------------
+// DesignerViewport : clipped, mouse-transparent container for the form. Moving
+// the form to negative coordinates for scrolling never bleeds outside it.
+// ---------------------------------------------------------------------------
+class DesignerViewport : public QWidget {
+public:
+    explicit DesignerViewport(QWidget* parent) : QWidget(parent) {
+        setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) {}
+};
+
+// ---------------------------------------------------------------------------
 // SelectionOverlay : draws hover/selection adornments above the widgets
 // ---------------------------------------------------------------------------
 class SelectionOverlay : public QWidget {
@@ -410,6 +424,8 @@ public:
     void selectAll();
     void alignSelection(int mode);
     void distributeSelection(bool horizontal);
+    void scrollByPage(int pages);
+    void scrollHome();
     enum AlignMode { AlignLeft, AlignRight, AlignTop, AlignBottom, AlignCenterH, AlignCenterV };
     void centerSelected(bool horizontal) { centerSelection(horizontal); }
     void raiseSelected();
@@ -418,6 +434,9 @@ public:
     void applyProperty(QWidget* widget, const char* name, const QVariant& value);
     void updateAdornments();
     void paintAdornments(QPainter& p);
+    void syncScroll();
+    void scrollTo(int x, int y);
+    void ensureVisible(QWidget* widget);
 
     ~DesignerCanvas();
 
@@ -433,6 +452,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* event);
     void keyPressEvent(QKeyEvent* event);
     void resizeEvent(QResizeEvent* event);
+    void wheelEvent(QWheelEvent* event);
     void leaveEvent(QEvent* event);
 
 private:
@@ -465,6 +485,11 @@ private:
     SelectionOverlay* overlay_;
     QMenu* contextMenu_;
     MenuRelay* menuRelay_;
+    DesignerViewport* viewport_;
+    int scrollX_;
+    int scrollY_;
+    int maxScrollX_;
+    int maxScrollY_;
     int hoverHandle_;
     bool grid_;
     Mode mode_;
@@ -481,7 +506,11 @@ DesignerCanvas::DesignerCanvas(DesignerDocument* doc)
     bandAdditive_ = false;
     setFocusPolicy(Qt::StrongFocus);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    form_ = new DesignerFormWidget(this);
+    viewport_ = new DesignerViewport(this);
+    viewport_->setGeometry(rect());
+    viewport_->show();
+
+    form_ = new DesignerFormWidget(viewport_);
     form_->setObjectName(doc_->formClass());
     form_->setGeometry(QRect(20, 20, 640, 480));
     form_->setObjectName(doc_->formClass());
@@ -560,6 +589,7 @@ void DesignerCanvas::rebuild() {
     QList<QXmlNode*> childNodes = top->childrenNamed(L"widget");
     for (int i = 0; i < childNodes.count(); ++i) buildWidgetTree(childNodes[i], form_);
     delete root;
+    syncScroll();
     if (overlay_) overlay_->raise();
     updateAdornments();
     update();
@@ -634,6 +664,7 @@ void DesignerCanvas::select(QWidget* widget, bool notify) {
     if (widget) list.append(widget);
     selection_ = list;
     selected_ = widget;
+    if (notify && list.count() == 1) ensureVisible(widget);
     updateAdornments();
     update();
     if (notify) selectionChanged(selected_);
@@ -749,6 +780,26 @@ void DesignerCanvas::paintEvent(QPaintEvent*) {
 }
 
 void DesignerCanvas::paintAdornments(QPainter& p) {
+    if (maxScrollX_ > 0) {
+        int trackW = width() - 6, y = height() - 6;
+        int thumbW = qMax(24, (width() - 6) * viewport_->width() / (form_->width() + 40));
+        int thumbX = 3 + (trackW - thumbW) * scrollX_ / qMax(1, maxScrollX_);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QBrush(QColor(0x00, 0x00, 0x00, 36)));
+        p.drawRect(QRect(3, y, trackW, 4));
+        p.setBrush(QBrush(QTheme::colors().accent));
+        p.drawRect(QRect(thumbX, y, thumbW, 4));
+    }
+    if (maxScrollY_ > 0) {
+        int trackH = height() - 6, x = width() - 6;
+        int thumbH = qMax(24, (height() - 6) * viewport_->height() / (form_->height() + 40));
+        int thumbY = 3 + (trackH - thumbH) * scrollY_ / qMax(1, maxScrollY_);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QBrush(QColor(0x00, 0x00, 0x00, 36)));
+        p.drawRect(QRect(x, 3, 4, trackH));
+        p.setBrush(QBrush(QTheme::colors().accent));
+        p.drawRect(QRect(x, thumbY, 4, thumbH));
+    }
     if (hover_ && !isSelected(hover_)) {
         QRect h = hover_->geometry().translated(form_->pos());
         p.setPen(QPen(QColor(0x00, 0x78, 0xD4, 120), 1, Qt::DashLine));
@@ -955,6 +1006,18 @@ void DesignerCanvas::mousePressEvent(QMouseEvent* event) {
     }
     if (event->button() != Qt::LeftButton) return;
 
+    if (maxScrollY_ > 0 && event->pos().x() >= width() - 8) {
+        scrollTo(scrollX_, scrollY_ + (event->pos().y() < height() / 2 ? -viewport_->height()
+                                                                        : viewport_->height()));
+        return;
+    }
+    if (maxScrollX_ > 0 && event->pos().y() >= height() - 8) {
+        scrollTo(scrollX_ + (event->pos().x() < width() / 2 ? -viewport_->width()
+                                                             : viewport_->width()),
+                 scrollY_);
+        return;
+    }
+
     bool ctrl = (event->modifiers() & Qt::ControlModifier) != 0;
     bool shift = (event->modifiers() & Qt::ShiftModifier) != 0;
 
@@ -1093,6 +1156,21 @@ void DesignerCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
 }
 
 void DesignerCanvas::keyPressEvent(QKeyEvent* event) {
+    int pageX = qMax(40, viewport_ ? viewport_->width() * 8 / 10 : 40);
+    int pageY = qMax(40, viewport_ ? viewport_->height() * 8 / 10 : 40);
+    switch (event->key()) {
+    case Qt::Key_PageDown: scrollTo(scrollX_, scrollY_ + pageY); return;
+    case Qt::Key_PageUp: scrollTo(scrollX_, scrollY_ - pageY); return;
+    case Qt::Key_Home:
+        if (event->modifiers() & Qt::ControlModifier) { scrollTo(0, scrollY_); return; }
+        scrollTo(scrollX_, 0);
+        return;
+    case Qt::Key_End:
+        if (event->modifiers() & Qt::ControlModifier) { scrollTo(maxScrollX_, scrollY_); return; }
+        scrollTo(scrollX_, maxScrollY_);
+        return;
+    default: break;
+    }
     if (event->key() == Qt::Key_Escape) {
         select(0);
         return;
@@ -1129,8 +1207,58 @@ void DesignerCanvas::keyPressEvent(QKeyEvent* event) {
 
 
 
-void DesignerCanvas::resizeEvent(QResizeEvent* event) {
+void DesignerCanvas::syncScroll() {
+    if (!form_ || !viewport_) return;
+    int contentW = form_->width() + 40;
+    int contentH = form_->height() + 40;
+    maxScrollX_ = qMax(0, contentW - viewport_->width());
+    maxScrollY_ = qMax(0, contentH - viewport_->height());
+    scrollX_ = qBound(0, scrollX_, maxScrollX_);
+    scrollY_ = qBound(0, scrollY_, maxScrollY_);
+    form_->move(20 - scrollX_, 20 - scrollY_);
+    viewport_->update();
     if (overlay_) overlay_->setGeometry(rect());
+    updateAdornments();
+}
+
+void DesignerCanvas::scrollTo(int x, int y) {
+    scrollX_ = x;
+    scrollY_ = y;
+    syncScroll();
+}
+
+void DesignerCanvas::scrollByPage(int pages) {
+    int page = viewport_ ? viewport_->height() * 8 / 10 : 200;
+    scrollTo(scrollX_, scrollY_ + pages * page);
+}
+
+void DesignerCanvas::scrollHome() {
+    scrollTo(0, 0);
+}
+
+void DesignerCanvas::ensureVisible(QWidget* widget) {
+    if (!widget || !viewport_) return;
+    QRect r = widget->geometry().translated(form_->pos());
+    int margin = 8;
+    int nx = scrollX_, ny = scrollY_;
+    if (r.left() < margin) nx -= (margin - r.left());
+    if (r.right() > viewport_->width() - margin) nx += (r.right() - (viewport_->width() - margin));
+    if (r.top() < margin) ny -= (margin - r.top());
+    if (r.bottom() > viewport_->height() - margin) ny += (r.bottom() - (viewport_->height() - margin));
+    scrollTo(nx, ny);
+}
+
+void DesignerCanvas::wheelEvent(QWheelEvent* event) {
+    int step = event->delta() > 0 ? -48 : 48;
+    if (event->modifiers() & Qt::ShiftModifier) scrollTo(scrollX_ + step, scrollY_);
+    else scrollTo(scrollX_, scrollY_ + step);
+    event->accept();
+}
+
+void DesignerCanvas::resizeEvent(QResizeEvent* event) {
+    if (viewport_) viewport_->setGeometry(rect());
+    if (overlay_) overlay_->setGeometry(rect());
+    syncScroll();
     QWidget::resizeEvent(event);
 }
 
@@ -1680,6 +1808,9 @@ private:
     void onCenterH();
     void onCenterV();
     void onSelectAll();
+    void onScrollUp();
+    void onScrollDown();
+    void onScrollHome();
     void onAlignLeft();
     void onAlignRight();
     void onAlignTop();
@@ -1785,6 +1916,13 @@ void DesignerWindow::buildMenus() {
     QObject::connect(distVAct, distVAct->triggered, this, &DesignerWindow::onDistributeV);
 
     QMenu* view = bar->addMenu(L"视图");
+    QAction* scrollUpAct = view->addAction(L"向上滚动");
+    QObject::connect(scrollUpAct, scrollUpAct->triggered, this, &DesignerWindow::onScrollUp);
+    QAction* scrollDownAct = view->addAction(L"向下滚动");
+    QObject::connect(scrollDownAct, scrollDownAct->triggered, this, &DesignerWindow::onScrollDown);
+    QAction* scrollHomeAct = view->addAction(L"回到左上角");
+    QObject::connect(scrollHomeAct, scrollHomeAct->triggered, this, &DesignerWindow::onScrollHome);
+    view->addSeparator();
     QAction* gridAct = view->addAction(L"显示网格");
     gridAct->setCheckable(true);
     gridAct->setChecked(true);
@@ -1816,6 +1954,11 @@ void DesignerWindow::buildMenus() {
     toolbar->addSeparator();
     toolbar->addAction(codeAct);
     toolbar->addAction(previewAct);
+    toolbar->addSeparator();
+    QAction* scrollUpTb = toolbar->addAction(L"滚动 ↑");
+    QObject::connect(scrollUpTb, scrollUpTb->triggered, this, &DesignerWindow::onScrollUp);
+    QAction* scrollDownTb = toolbar->addAction(L"滚动 ↓");
+    QObject::connect(scrollDownTb, scrollDownTb->triggered, this, &DesignerWindow::onScrollDown);
 }
 
 void DesignerWindow::buildUi() {
@@ -2299,6 +2442,10 @@ void DesignerWindow::onTabOrder() {
 void DesignerWindow::onCenterH() { canvas_->centerSelected(true); }
 void DesignerWindow::onCenterV() { canvas_->centerSelected(false); }
 
+void DesignerWindow::onScrollUp() { canvas_->scrollByPage(-1); }
+void DesignerWindow::onScrollDown() { canvas_->scrollByPage(1); }
+void DesignerWindow::onScrollHome() { canvas_->scrollHome(); }
+
 void DesignerWindow::onSelectAll() {
     canvas_->selectAll();
     refreshProperties();
@@ -2456,6 +2603,22 @@ int DesignerWindow::selfTest() {
                 ++failures;
             }
         }
+    }
+
+    // canvas scrolling: large form, scroll by page, then back home
+    newDocument();
+    canvas_->form()->resize(2000, 1500);
+    int y0 = canvas_->form()->y();
+    canvas_->scrollByPage(1);
+    int y1 = canvas_->form()->y();
+    if (y1 >= y0) {
+        printf("FAIL: scroll down (%d -> %d)\n", y0, y1);
+        ++failures;
+    }
+    canvas_->scrollHome();
+    if (canvas_->form()->y() != 20) {
+        printf("FAIL: scroll home (%d)\n", canvas_->form()->y());
+        ++failures;
     }
 
     printf("designer selftest: %s (%d failures)\n", failures ? "FAILED" : "PASSED", failures);

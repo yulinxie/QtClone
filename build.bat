@@ -98,7 +98,7 @@ exit /b 1
 :smoke_passed
 echo       smoke tests passed
 
-echo [6/7] running designer self test ...
+echo [6/8] running designer self test ...
 "%OUT%\wfdesigner.exe" --selftest > "%OUT%\designer_selftest.log" 2>&1
 if errorlevel 1 goto designer_failed
 if not errorlevel 0 goto designer_failed
@@ -110,7 +110,7 @@ exit /b 1
 :designer_passed
 echo       designer self test passed
 
-echo [7/7] building the .ui example and screenshots ...
+echo [7/8] building the .ui example ...
 if not exist "%OUT%\form" mkdir "%OUT%\form"
 "%OUT%\qtcuic.exe" "%ROOT%\examples\form\Form1.ui" -o "%OUT%\form\ui_form1.h" -q || exit /b 1
 cl %CFLAGS% /I"%OUT%\form" /c "%ROOT%\examples\form\main.cpp" /Fo"%OBJ%\form_main.obj" >> "%LOG%" 2>&1 || (echo form compile FAILED & exit /b 1)
@@ -125,6 +125,24 @@ if not exist "%OUT%\shots" mkdir "%OUT%\shots"
 "%OUT%\wfdesigner.exe" --open "%ROOT%\examples\form\Form1.ui" --screenshot "%OUT%\shots\designer_form.png" >nul
 "%OUT%\wfdesigner.exe" --open "%ROOT%\examples\form\Form1.ui" --theme dark --screenshot "%OUT%\shots\designer_form_dark.png" >nul
 "%OUT%\wf_form.exe" --screenshot "%OUT%\shots\form_light.png" >nul
+
+echo [8/8] building the IDA Pro 9 demo ...
+cl %CFLAGS% /c "%ROOT%\examples\idademo\ida_demo.cpp" /Fo"%OBJ%\ida_demo.obj" >> "%LOG%" 2>&1 || (echo idademo compile FAILED & exit /b 1)
+link /nologo /out:"%OUT%\idademo.exe" "%OBJ%\ida_demo.obj" "%OUT%\wf.lib" %LIBS% >> "%LOG%" 2>&1 || (echo idademo link FAILED & exit /b 1)
+"%OUT%\idademo.exe" --selftest > "%OUT%\idademo_selftest.log" 2>&1
+if errorlevel 1 goto idademo_failed
+if not errorlevel 0 goto idademo_failed
+goto idademo_passed
+:idademo_failed
+echo IDA demo self test FAILED - see %OUT%\idademo_selftest.log
+type "%OUT%\idademo_selftest.log"
+exit /b 1
+:idademo_passed
+"%OUT%\idademo.exe" --screenshot "%OUT%\shots\ida_dark.png" >nul
+"%OUT%\idademo.exe" --theme light --screenshot "%OUT%\shots\ida_light.png" >nul
+"%OUT%\idademo.exe" --tab pseudo --screenshot "%OUT%\shots\ida_pseudo.png" >nul
+"%OUT%\idademo.exe" --tab graph --screenshot "%OUT%\shots\ida_graph.png" >nul
+echo       %OUT%\idademo.exe
 echo       screenshots in %OUT%\shots
 
 :done

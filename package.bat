@@ -21,6 +21,7 @@ copy /y "%ROOT%\out\wf.lib" "%DIST%\lib\" >nul
 copy /y "%ROOT%\out\qtcuic.exe" "%DIST%\bin\" >nul
 copy /y "%ROOT%\out\wfdesigner.exe" "%DIST%\bin\" >nul
 copy /y "%ROOT%\out\gallery.exe" "%DIST%\bin\" >nul
+copy /y "%ROOT%\out\idademo.exe" "%DIST%\bin\" >nul
 copy /y "%ROOT%\README.md" "%DIST%\" >nul
 copy /y "%ROOT%\LICENSE" "%DIST%\" >nul
 xcopy "%ROOT%\docs" "%DIST%\docs\" /E /I /Y >nul
@@ -31,7 +32,7 @@ echo.
 echo dist\ created:
 echo   include\qtc\   headers
 echo   lib\wf.lib     import-free static library
-echo   bin\           qtcuic.exe, wfdesigner.exe, gallery.exe
+echo   bin\           qtcuic.exe, wfdesigner.exe, gallery.exe, idademo.exe
 echo   docs\          architecture, reflection, styling, designer, vs2010
 echo   examples\      .ui + generated-code sample
 exit /b 0

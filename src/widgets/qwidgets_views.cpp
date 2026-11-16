@@ -572,7 +572,18 @@ QTreeWidgetItem* QTreeWidget::itemAtPoint(const QPoint& pos, int* depth, QRect* 
     if (index < 0 || index >= items.count()) return 0;
     if (rowRect) *rowRect = QRect(0, headerH + offset + index * itemHeight_, width(), itemHeight_);
     if (depth) *depth = depths[index];
-    if (column) *column = qBound(0, pos.x() / qMax(1, columnWidth_), qMax(0, headers_.count() - 1));
+    if (column) {
+        int avail = width() - 4;
+        int first = headers_.count() > 1 ? qMax(120, avail * 45 / 100) : avail;
+        int rest = headers_.count() > 1 ? qMax(1, (avail - first) / (headers_.count() - 1)) : avail;
+        int col = 0;
+        int x = pos.x();
+        if (x >= first && headers_.count() > 1) {
+            col = 1 + (x - first) / qMax(1, rest);
+            if (col >= headers_.count()) col = headers_.count() - 1;
+        }
+        *column = qBound(0, col, qMax(0, headers_.count() - 1));
+    }
     return items[index];
 }
 
@@ -585,11 +596,16 @@ void QTreeWidget::paintEvent(QPaintEvent*) {
     p.drawRect(rect().adjusted(0, 0, -1, -1));
 
     int headerH = 0;
+    int avail = width() - 4 - (vbar_ && vbar_->isVisible() ? vbar_->width() : 0);
+    int firstW = headers_.count() > 1 ? qMax(110, avail * 38 / 100) : avail;
+    int restW = headers_.count() > 1 ? qMax(40, (avail - firstW) / (headers_.count() - 1)) : avail;
     if (!headers_.isEmpty()) {
         headerH = itemHeight_;
         for (int i = 0; i < headers_.count(); ++i) {
             QStyleOptionHeader opt;
-            opt.rect = QRect(i * columnWidth_, 0, columnWidth_, headerH);
+            int hx = (i == 0) ? 0 : (firstW + (i - 1) * restW);
+            int hw = (i == 0) ? firstW : restW;
+            opt.rect = QRect(hx, 0, hw, headerH);
             opt.text = headers_[i];
             style()->drawHeader(&p, opt, this);
         }
@@ -629,7 +645,15 @@ void QTreeWidget::paintEvent(QPaintEvent*) {
         }
         p.setPen(QPen(selected ? c.selectionText : c.windowText));
         p.setFont(hasChildren ? bold : f);
-        p.drawText(QRect(x, y, width() - x - 8, itemHeight_), Qt::AlignLeft | Qt::AlignVCenter, items[i]->text(0));
+        p.drawText(QRect(x, y, qMax(10, firstW - x), itemHeight_), Qt::AlignLeft | Qt::AlignVCenter,
+                   items[i]->text(0));
+        p.setFont(f);
+        for (int col = 1; col < headers_.count(); ++col) {
+            int cx = firstW + (col - 1) * restW;
+            if (cx >= width()) break;
+            QRect cell(cx, y, restW - 4, itemHeight_);
+            p.drawText(cell, Qt::AlignLeft | Qt::AlignVCenter, items[i]->text(col));
+        }
     }
     p.setClipping(false);
 }

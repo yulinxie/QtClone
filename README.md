@@ -51,6 +51,7 @@ QtClone/
 ├─ tools/uicgen/          .ui → C++ 生成器（设计器与 qtcuic 共用）
 ├─ tools/qtcuic/          uic 命令行工具
 ├─ examples/gallery/      控件画廊（截图源）
+├─ examples/idademo/      IDA Pro 9 界面复刻（自绘反汇编/图/伪代码视图）
 ├─ examples/form/         由 Form1.ui 生成代码的完整示例（含 VS2010 自定义生成步骤）
 ├─ tests/smoke.cpp        冒烟测试
 ├─ build.bat              一键构建（库/工具/设计器/示例/测试/截图）
@@ -80,6 +81,7 @@ VS2010 用户：直接打开 `QtClone.sln` 构建即可（已验证 `MSBuild.exe
 | `out/qtcuic.exe` | `.ui` 编译器 |
 | `out/gallery.exe` | 控件画廊 |
 | `out/wf_form.exe` | 由 `Form1.ui` 生成代码编译的示例 |
+| `out/idademo.exe` | IDA Pro 9 风格演示程序 |
 | `out/wf_smoke.exe` | 冒烟测试（控制台） |
 | `out/shots/*.png` | 亮/暗主题截图 |
 
@@ -160,7 +162,38 @@ int main(int argc, char** argv) {
 
 ---
 
-## 6. 主题与样式表
+## 6. 示例：复刻 IDA Pro 9 界面
+
+`examples/idademo/` 用框架完整复刻了一个 IDA Pro 9 风格的分析界面（功能区、函数列表、
+反汇编视图、控制流图、伪代码、交叉引用、输出窗口、状态栏），并支持亮/暗主题：
+
+![IDA Pro 9 风格界面 - 暗色](docs/images/ida_dark.png)
+
+它完全由框架控件 + 自绘 QPainter 实现，没有 moc、没有第三方依赖：
+
+* **功能区**：`QTabWidget` + 扁平按钮，FILE/EDIT/VIEW/SEARCH/OPTIONS/WINDOWS/HELP 七页；
+* **自绘反汇编列表**：地址/机器码/助记符分列，助记符、寄存器、数字、字符串、注释分别着色，
+  当前行高亮、滚轮/键盘导航，点击 `call` 跳转被调函数；
+* **自绘伪代码**：行号栏 + 关键字/字符串着色；
+* **自绘控制流图**：基本块、箭头连线、当前块高亮、点击联动；
+* **导航带**：按段着色并可点击定位；
+* **亮/暗主题**：功能区的 Dark/Light/System 按钮即时切换（同一套自绘代码，颜色随主题变化）。
+
+![伪代码视图](docs/images/ida_pseudo.png)
+![控制流图](docs/images/ida_graph.png)
+
+运行：
+
+```bat
+out\idademo.exe                     :: 暗色，反汇编视图
+out\idademo.exe --theme light
+out\idademo.exe --tab graph         :: 也可 pseudo / hex
+out\idademo.exe --selftest
+```
+
+详见 [docs/idademo.md](docs/idademo.md)。
+
+## 7. 主题与样式表
 
 ```cpp
 QTheme::setMode(QTheme::Light);   // 亮色
@@ -184,7 +217,7 @@ button->setStyleSheet(
 
 ---
 
-## 7. 与 Qt 的对应关系
+## 8. 与 Qt 的对应关系
 
 | Qt | QtClone |
 | --- | --- |
@@ -202,7 +235,7 @@ button->setStyleSheet(
 
 ---
 
-## 8. 测试
+## 9. 测试
 
 ```bat
 out\wf_smoke.exe            :: 40+ 项断言：字符串/变体/XML/工厂/布局/QSS/主题/uic
@@ -213,6 +246,6 @@ out\wfdesigner.exe --selftest  :: 设计器：添加控件、序列化、撤销/
 
 ---
 
-## 9. 许可
+## 10. 许可
 
 MIT。示例、库与工具均可自由用于商业项目。`Microsoft YaHei UI` 等仅为系统字体引用。

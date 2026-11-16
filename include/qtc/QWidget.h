@@ -257,6 +257,8 @@ private:
 
     void createWindow();
     void destroyWindow();
+    void propagateOwnerWindow(QWidgetWindow* window);
+    void clearOwnerWindow();
     void renderInternal(QPainter* painter, const QPoint& origin, const QRect& clip);
     void paintSelf(QPainter* painter);
     void layoutChildren();

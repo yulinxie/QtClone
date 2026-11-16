@@ -257,7 +257,7 @@ void QWidget::setParentWidget(QWidget* parent) {
     d_->parent = parent;
     if (parent) {
         parent->d_func()->children.append(this);
-        d_->ownerWindow = parent->windowHandle();
+        d_->ownerWindow = isWindow() ? 0 : parent->windowHandle();
         if (!(d_->flags & Qt::WindowType_Mask)) d_->flags = Qt::Widget;
         if (!isWindow() && parent->d_func()->visible && !d_->explicitHide && !d_->visible) show();
     } else {
@@ -296,6 +296,23 @@ QWidgetList QWidget::childrenWidgets() const { return d_->children; }
 // ---------------------------------------------------------------------------
 // window creation
 // ---------------------------------------------------------------------------
+void QWidget::propagateOwnerWindow(QWidgetWindow* window) {
+    if (isWindow()) return;  // popups/dialogs own their window, never borrow one
+    d_->ownerWindow = window;
+    for (int i = 0; i < d_->children.count(); ++i)
+        d_->children[i]->propagateOwnerWindow(window);
+}
+
+void QWidget::clearOwnerWindow() {
+    if (isWindow()) {
+        d_->ownerWindow = 0;
+        return;
+    }
+    d_->ownerWindow = 0;
+    for (int i = 0; i < d_->children.count(); ++i)
+        d_->children[i]->clearOwnerWindow();
+}
+
 void QWidget::createWindow() {
     if (d_->window) return;
     if (!isWindow()) return;
@@ -306,10 +323,14 @@ void QWidget::createWindow() {
         return;
     }
     d_->created = true;
+    // Widgets parented before the window existed have no ownerWindow yet;
+    // giving the whole subtree the window makes update()/show()/focus work.
+    propagateOwnerWindow(d_->window);
 }
 
 void QWidget::destroyWindow() {
     if (!d_->window) return;
+    clearOwnerWindow();
     d_->window->destroy();
     delete d_->window;
     d_->window = 0;

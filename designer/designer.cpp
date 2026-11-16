@@ -1542,6 +1542,81 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
+// TabOrderDialog : reorder form children (the focus chain follows this order)
+// ---------------------------------------------------------------------------
+class TabOrderDialog : public QDialog {
+public:
+    TabOrderDialog(QWidget* owner, QWidget* form)
+        : QDialog(owner), form_(form), changed_(false) {
+        setWindowTitle(L"Tab 顺序");
+        resize(420, 500);
+        setFixedSize(420, 500);
+        order_ = form->childrenWidgets();
+
+        QLabel* hint = new QLabel(L"列表从上到下就是 Tab 焦点顺序，选中条目后用“上移/下移”调整。", this);
+        hint->setWordWrap(true);
+        hint->setGeometry(10, 10, 400, 34);
+
+        list_ = new QListWidget(this);
+        list_->setGeometry(10, 50, 400, 366);
+        list_->setAlternatingRowColors(true);
+
+        QPushButton* up = new QPushButton(L"上移", this);
+        up->setGeometry(10, 424, 80, 28);
+        QPushButton* down = new QPushButton(L"下移", this);
+        down->setGeometry(96, 424, 80, 28);
+        QPushButton* ok = new QPushButton(L"确定", this);
+        ok->setGeometry(238, 424, 80, 28);
+        QPushButton* cancel = new QPushButton(L"取消", this);
+        cancel->setGeometry(324, 424, 86, 28);
+
+        QObject::connect(up, up->clicked, static_cast<TabOrderDialog*>(this), &TabOrderDialog::moveUp);
+        QObject::connect(down, down->clicked, static_cast<TabOrderDialog*>(this), &TabOrderDialog::moveDown);
+        QObject::connect(ok, ok->clicked, static_cast<TabOrderDialog*>(this), &TabOrderDialog::confirm);
+        QObject::connect(cancel, cancel->clicked, static_cast<QDialog*>(this), &QDialog::reject);
+        refresh(0);
+    }
+
+    bool changed() const { return changed_; }
+
+private:
+    void refresh(int currentRow) {
+        list_->clear();
+        for (int i = 0; i < order_.count(); ++i) {
+            list_->addItem(QString::number(i + 1) + L". " + order_[i]->objectName() +
+                           L"  (" + QString(order_[i]->className()) + L")");
+        }
+        if (order_.count() > 0)
+            list_->setCurrentRow(qBound(0, currentRow, order_.count() - 1));
+        list_->repaint();
+    }
+
+    void moveUp() { move(-1); }
+    void moveDown() { move(1); }
+
+    void move(int step) {
+        int row = list_->currentRow();
+        int target = row + step;
+        if (row < 0 || target < 0 || target >= order_.count()) return;
+        QWidget* tmp = order_[row];
+        order_[row] = order_[target];
+        order_[target] = tmp;
+        changed_ = true;
+        refresh(target);
+    }
+
+    void confirm() {
+        for (int i = 0; i < order_.count(); ++i) order_[i]->raise();
+        accept();
+    }
+
+    QWidget* form_;
+    QListWidget* list_;
+    QList<QWidget*> order_;
+    bool changed_;
+};
+
+// ---------------------------------------------------------------------------
 // DesignerWindow
 // ---------------------------------------------------------------------------
 class DesignerWindow : public QMainWindow {
@@ -1601,6 +1676,7 @@ private:
     void onInspectorContextMenu(QTreeWidgetItem* item, const QPoint& globalPos);
     void onTreeDoubleClicked(QTreeWidgetItem* item, int column);
     void onFormSize();
+    void onTabOrder();
     void onCenterH();
     void onCenterV();
     void onSelectAll();
@@ -1686,6 +1762,9 @@ void DesignerWindow::buildMenus() {
     QObject::connect(frontAct, frontAct->triggered, this, &DesignerWindow::onRaise);
     QAction* backAct = edit->addAction(L"置于底层");
     QObject::connect(backAct, backAct->triggered, this, &DesignerWindow::onLower);
+    edit->addSeparator();
+    QAction* tabOrderAct = edit->addAction(L"Tab 顺序...");
+    QObject::connect(tabOrderAct, tabOrderAct->triggered, this, &DesignerWindow::onTabOrder);
     edit->addSeparator();
     QAction* selectAllAct = edit->addAction(L"全选");
     selectAllAct->setShortcut(L"Ctrl+A");
@@ -2204,6 +2283,17 @@ void DesignerWindow::onFormSize() {
     canvas_->captureToDocument();
     canvas_->update();
     refreshProperties();
+}
+
+void DesignerWindow::onTabOrder() {
+    if (!canvas_->form()) return;
+    TabOrderDialog dlg(this, canvas_->form());
+    if (dlg.exec() == QDialog::Accepted && dlg.changed()) {
+        canvas_->captureToDocument();
+        refreshInspector();
+        refreshProperties();
+        setStatus(L"已更新 Tab 顺序");
+    }
 }
 
 void DesignerWindow::onCenterH() { canvas_->centerSelected(true); }

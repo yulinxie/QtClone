@@ -52,6 +52,7 @@ QtClone/
 ├─ tools/qtcuic/          uic 命令行工具
 ├─ examples/gallery/      控件画廊（截图源）
 ├─ examples/idademo/      IDA Pro 9 界面复刻（自绘反汇编/图/伪代码视图）
+├─ examples/wechat/       微信 PC 版界面复刻（会话列表/气泡/输入区）
 ├─ examples/form/         由 Form1.ui 生成代码的完整示例（含 VS2010 自定义生成步骤）
 ├─ tests/smoke.cpp        冒烟测试
 ├─ build.bat              一键构建（库/工具/设计器/示例/测试/截图）
@@ -82,6 +83,7 @@ VS2010 用户：直接打开 `QtClone.sln` 构建即可（已验证 `MSBuild.exe
 | `out/gallery.exe` | 控件画廊 |
 | `out/wf_form.exe` | 由 `Form1.ui` 生成代码编译的示例 |
 | `out/idademo.exe` | IDA Pro 9 风格演示程序 |
+| `out/wechat.exe` | 微信 PC 风格演示程序 |
 | `out/wf_smoke.exe` | 冒烟测试（控制台） |
 | `out/shots/*.png` | 亮/暗主题截图 |
 
@@ -193,7 +195,34 @@ out\idademo.exe --selftest
 
 详见 [docs/idademo.md](docs/idademo.md)。
 
-## 7. 主题与样式表
+## 7. 示例：复刻微信 PC 版界面
+
+`examples/wechat/` 复刻了微信 PC 端的会话界面：左侧功能栏、会话列表、聊天气泡、
+输入区与亮/暗主题，全部由框架控件 + 自绘 QPainter 实现。
+
+![微信 PC 风格界面 - 亮色](docs/images/wechat_light.png)
+![微信 PC 风格界面 - 暗色](docs/images/wechat_dark.png)
+
+* **左侧功能栏**：自绘头像与聊天/通讯录/收藏/文件/朋友圈/设置图标、未读红点、选中绿条；
+* **会话列表**：头像、昵称、消息预览、时间、未读角标、选中/悬浮态、滚轮滚动；
+* **聊天气泡**：自己（微信绿）/对方（白/深灰），圆角 + 小尾巴、头像、时间戳、
+  群聊发送者名、自动换行、滚到底部；
+* **输入区**：Enter 发送 / Shift+Enter 换行，工具栏与绿色发送按钮；
+* **搜索过滤**：输入即筛选会话；
+* **主题**：同一套自绘代码在亮色/暗色下自动换色。
+
+运行：
+
+```bat
+out\wechat.exe                    :: 亮色
+out\wechat.exe --theme dark
+out\wechat.exe --chat 2
+out\wechat.exe --selftest         :: 含真实鼠标点击的输入链路自检
+```
+
+详见 [docs/wechat.md](docs/wechat.md)。
+
+## 8. 主题与样式表
 
 ```cpp
 QTheme::setMode(QTheme::Light);   // 亮色
@@ -217,7 +246,7 @@ button->setStyleSheet(
 
 ---
 
-## 8. 与 Qt 的对应关系
+## 9. 与 Qt 的对应关系
 
 | Qt | QtClone |
 | --- | --- |
@@ -235,7 +264,7 @@ button->setStyleSheet(
 
 ---
 
-## 9. 测试
+## 10. 测试
 
 ```bat
 out\wf_smoke.exe            :: 40+ 项断言：字符串/变体/XML/工厂/布局/QSS/主题/uic
@@ -246,6 +275,6 @@ out\wfdesigner.exe --selftest  :: 设计器：添加控件、序列化、撤销/
 
 ---
 
-## 10. 许可
+## 11. 许可
 
 MIT。示例、库与工具均可自由用于商业项目。`Microsoft YaHei UI` 等仅为系统字体引用。

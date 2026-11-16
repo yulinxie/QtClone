@@ -483,6 +483,7 @@ void QPushButton::drawButton(QPainter* painter) {
     opt.checked = checked_;
     opt.down = down_ || pressInProgress_;
     opt.defaultButton = defaultButton_;
+    opt.flat = flat_;
     opt.state = QStyle::State_Enabled | QStyle::State_Raised;
     if (!isEnabled()) opt.state = QStyle::State_None;
     if (down_) opt.state |= QStyle::State_Sunken;

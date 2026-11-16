@@ -18,6 +18,7 @@ GUID = {
     'gallery': '{7A1F3C10-0004-4E8B-9C11-000000000004}',
     'wf_form': '{7A1F3C10-0005-4E8B-9C11-000000000005}',
     'idademo': '{7A1F3C10-0006-4E8B-9C11-000000000006}',
+    'wechat': '{7A1F3C10-0007-4E8B-9C11-000000000007}',
 }
 
 LIBS = ('user32.lib;gdi32.lib;gdiplus.lib;comctl32.lib;comdlg32.lib;shell32.lib;'
@@ -164,6 +165,9 @@ def main():
     projects['idademo'] = vcxproj('idademo', 'Application',
                                    ['examples\\idademo\\ida_demo.cpp'],
                                    link_extra=lib_extra, project_refs=['qtc.vcxproj'])
+    projects['wechat'] = vcxproj('wechat', 'Application',
+                                  ['examples\\wechat\\wechat_demo.cpp'],
+                                  link_extra=lib_extra, project_refs=['qtc.vcxproj'])
     projects['wf_form'] = vcxproj('wf_form', 'Application',
                                   ['examples\\form\\main.cpp'],
                                   extra_items=custom_build,
@@ -177,7 +181,7 @@ def main():
         print('wrote', name + '.vcxproj')
 
     sln = ['', 'Microsoft Visual Studio Solution File, Format Version 11.00', '# Visual Studio 2010']
-    order = ['qtc', 'qtcuic', 'wfdesigner', 'gallery', 'wf_form', 'idademo']
+    order = ['qtc', 'qtcuic', 'wfdesigner', 'gallery', 'wf_form', 'idademo', 'wechat']
     for name in order:
         sln.append('Project("%s") = "%s", "%s.vcxproj", "%s"' % (GUID[name], name, name, GUID[name]))
         sln.append('EndProject')

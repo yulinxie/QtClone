@@ -14,13 +14,15 @@ struct QStyleOption {
 };
 
 struct QStyleOptionButton : QStyleOption {
-    QStyleOptionButton() : checked(false), down(false), defaultButton(false), hasIcon(false) {}
+    QStyleOptionButton() : checked(false), down(false), defaultButton(false), hasIcon(false),
+                           flat(false) {}
     QString text;
     QIcon icon;
     bool checked;
     bool down;
     bool defaultButton;
     bool hasIcon;
+    bool flat;
 };
 
 struct QStyleOptionToolButton : QStyleOptionButton {

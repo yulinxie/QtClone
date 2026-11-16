@@ -988,11 +988,13 @@ QPoint QWidget::mapFromGlobal(const QPoint& p) const {
 }
 
 QPoint QWidget::mapTo(const QWidget* parent, const QPoint& p) const {
-    return p - mapToGlobal(QPoint(0, 0)) + parent->mapToGlobal(QPoint(0, 0));
+    // p is in this widget's coordinates
+    return p + mapToGlobal(QPoint(0, 0)) - parent->mapToGlobal(QPoint(0, 0));
 }
 
 QPoint QWidget::mapFrom(const QWidget* parent, const QPoint& p) const {
-    return p + mapToGlobal(QPoint(0, 0)) - parent->mapToGlobal(QPoint(0, 0));
+    // p is in parent's coordinates
+    return p + parent->mapToGlobal(QPoint(0, 0)) - mapToGlobal(QPoint(0, 0));
 }
 
 void QWidget::raise() {

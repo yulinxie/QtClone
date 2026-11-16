@@ -85,13 +85,23 @@ void QStyle::drawButton(QPainter* p, const QStyleOptionButton& opt, const QWidge
     }
     if (opt.defaultButton && enabled && !checked) border = c.accent;
 
-    if (opt.state & State_Default) {
-        p->setPen(QPen(withAlpha(c.accent, 80), 2));
-        p->setBrush(Qt::NoBrush);
-        p->drawRoundedRect(opt.rect.adjusted(1, 1, -2, -2), radius + 1, radius + 1);
-    }
+    bool flatLook = opt.flat && !box.hasBackground && !box.hasBorder;
+    if (flatLook) {
+        if (down || checked) {
+            roundedFill(p, opt.rect, 5, withAlpha(c.accent, 32), withAlpha(c.accent, 32), 1);
+        } else if (hover) {
+            roundedFill(p, opt.rect, 5, blend(c.window, c.buttonHover, 0.6),
+                        blend(c.window, c.buttonHover, 0.6), 1);
+        }
+    } else {
+        if (opt.state & State_Default) {
+            p->setPen(QPen(withAlpha(c.accent, 80), 2));
+            p->setBrush(Qt::NoBrush);
+            p->drawRoundedRect(opt.rect.adjusted(1, 1, -2, -2), radius + 1, radius + 1);
+        }
 
-    roundedFill(p, opt.rect, radius, fill, border, 1);
+        roundedFill(p, opt.rect, radius, fill, border, 1);
+    }
 
     if (opt.hasIcon) {
         QSize is(16, 16);

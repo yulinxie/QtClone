@@ -98,7 +98,7 @@ exit /b 1
 :smoke_passed
 echo       smoke tests passed
 
-echo [6/8] running designer self test ...
+echo [6/9] running designer self test ...
 "%OUT%\wfdesigner.exe" --selftest > "%OUT%\designer_selftest.log" 2>&1
 if errorlevel 1 goto designer_failed
 if not errorlevel 0 goto designer_failed
@@ -110,7 +110,7 @@ exit /b 1
 :designer_passed
 echo       designer self test passed
 
-echo [7/8] building the .ui example ...
+echo [7/9] building the .ui example ...
 if not exist "%OUT%\form" mkdir "%OUT%\form"
 "%OUT%\qtcuic.exe" "%ROOT%\examples\form\Form1.ui" -o "%OUT%\form\ui_form1.h" -q || exit /b 1
 cl %CFLAGS% /I"%OUT%\form" /c "%ROOT%\examples\form\main.cpp" /Fo"%OBJ%\form_main.obj" >> "%LOG%" 2>&1 || (echo form compile FAILED & exit /b 1)
@@ -126,7 +126,7 @@ if not exist "%OUT%\shots" mkdir "%OUT%\shots"
 "%OUT%\wfdesigner.exe" --open "%ROOT%\examples\form\Form1.ui" --theme dark --screenshot "%OUT%\shots\designer_form_dark.png" >nul
 "%OUT%\wf_form.exe" --screenshot "%OUT%\shots\form_light.png" >nul
 
-echo [8/8] building the IDA Pro 9 demo ...
+echo [8/9] building the IDA Pro 9 demo ...
 cl %CFLAGS% /c "%ROOT%\examples\idademo\ida_demo.cpp" /Fo"%OBJ%\ida_demo.obj" >> "%LOG%" 2>&1 || (echo idademo compile FAILED & exit /b 1)
 link /nologo /out:"%OUT%\idademo.exe" "%OBJ%\ida_demo.obj" "%OUT%\wf.lib" %LIBS% >> "%LOG%" 2>&1 || (echo idademo link FAILED & exit /b 1)
 "%OUT%\idademo.exe" --selftest > "%OUT%\idademo_selftest.log" 2>&1
@@ -143,6 +143,21 @@ exit /b 1
 "%OUT%\idademo.exe" --tab pseudo --screenshot "%OUT%\shots\ida_pseudo.png" >nul
 "%OUT%\idademo.exe" --tab graph --screenshot "%OUT%\shots\ida_graph.png" >nul
 echo       %OUT%\idademo.exe
+echo [9/9] building the WeChat demo ...
+cl %CFLAGS% /c "%ROOT%\examples\wechat\wechat_demo.cpp" /Fo"%OBJ%\wechat_demo.obj" >> "%LOG%" 2>&1 || (echo wechat compile FAILED & exit /b 1)
+link /nologo /out:"%OUT%\wechat.exe" "%OBJ%\wechat_demo.obj" "%OUT%\wf.lib" %LIBS% >> "%LOG%" 2>&1 || (echo wechat link FAILED & exit /b 1)
+"%OUT%\wechat.exe" --selftest > "%OUT%\wechat_selftest.log" 2>&1
+if errorlevel 1 goto wechat_failed
+if not errorlevel 0 goto wechat_failed
+goto wechat_passed
+:wechat_failed
+echo WeChat demo self test FAILED - see %OUT%\wechat_selftest.log
+type "%OUT%\wechat_selftest.log"
+exit /b 1
+:wechat_passed
+"%OUT%\wechat.exe" --screenshot "%OUT%\shots\wechat_light.png" >nul
+"%OUT%\wechat.exe" --theme dark --screenshot "%OUT%\shots\wechat_dark.png" >nul
+echo       %OUT%\wechat.exe
 echo       screenshots in %OUT%\shots
 
 :done

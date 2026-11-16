@@ -425,7 +425,7 @@ public:
     QList<QObject*> eventFilters() const { return eventFilters_; }
     virtual bool eventFilter(QObject* watched, QEvent* event);
 
-    bool event(QEvent* event);
+    virtual bool event(QEvent* event);
     void deleteLater();
 
     int startTimer(int interval);

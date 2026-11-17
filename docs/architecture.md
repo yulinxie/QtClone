@@ -201,3 +201,26 @@ out\wechat.exe
 
 它的构建/运行已接入 `build.bat` 第 6 步和 VS 的 `wf_clicktest` 项目；失败即中断构建。
 移除 `handleMouse` 里的强制重绘后，这个测试会立刻失败——可用来验证兜底逻辑是否还在。
+
+
+## 退出与模态对话框
+
+- **关闭最后一个可见顶层窗口会结束进程**（等价于 Qt 的 `quitOnLastWindowClosed`）。
+  以前窗口消失后进程还在，看起来就是“退不出”。
+- `QDialog::exec()` 是真正的嵌套消息循环：禁用 owner、`show()`、循环 `GetMessage/DispatchMessage`。
+  对话框会**居中到 owner 窗口**，而不是停在 (0,0)。
+- `QMessageBox` 的尺寸按文本和按钮数量计算，不再沿用 800×600 的默认窗口。
+
+### 一个容易踩的坑：三参数 connect
+
+`Signal::connect(sender, receiver, slot)` 会把传入的 `sender` 记成“当前发送者”。
+如果写成 `button->clicked.connect(this, this, &Box::onButtonClicked)`，
+发送者会被记成**对话框**而不是按钮，槽里用 `qtcCurrentSender()` 比较按钮时永远匹配不上——
+点击其实到了，但什么都没发生。必须用四参数形式：
+
+```cpp
+QObject::connect(button, button->clicked, this, &Box::onButtonClicked);
+```
+
+`clicktest` 里专门有一条用例：点击 QMessageBox 的标准按钮，断言对话框会关闭；
+把 connect 改回三参数形式，这条用例立刻失败。

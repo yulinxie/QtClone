@@ -514,7 +514,18 @@ void QWidget::close() {
     }
     QCloseEvent ev;
     event(&ev);
-    if (ev.isAccepted()) hide();
+    if (!ev.isAccepted()) return;
+    hide();
+
+    // Closing the last visible top level window ends the application,
+    // like Qt does by default. Without this the process survives with no
+    // window left, which looks like "the app cannot be exited".
+    QWidgetList tops = QApplication::topLevelWidgets();
+    bool anyVisible = false;
+    for (int i = 0; i < tops.count(); ++i) {
+        if (tops[i]->isVisible()) { anyVisible = true; break; }
+    }
+    if (!anyVisible) QApplication::quit();
 }
 
 bool QWidget::isActiveWindow() const { return d_->activeWindow; }

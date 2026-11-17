@@ -1,4 +1,4 @@
-// QtClone - qwidgets_containers.cpp : tab widget, scroll area, splitter, stacked widget.
+﻿// QtClone - qwidgets_containers.cpp : tab widget, scroll area, splitter, stacked widget.
 #include <qtc/QtWidgets.h>
 #include <qtc/QStyle.h>
 #include "qwidget_p.h"
@@ -337,8 +337,8 @@ QScrollArea::QScrollArea(QWidget* parent)
     vbar_ = new QScrollBar(Qt::Vertical, this);
     hbar_->hide();
     vbar_->hide();
-    hbar_->valueChanged.connect(this, this, &QScrollArea::updateBars);
-    vbar_->valueChanged.connect(this, this, &QScrollArea::updateBars);
+    QObject::connect(hbar_, hbar_->valueChanged, this, &QScrollArea::updateBars);
+    QObject::connect(vbar_, vbar_->valueChanged, this, &QScrollArea::updateBars);
 }
 
 QScrollArea::~QScrollArea() {}

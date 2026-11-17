@@ -2004,8 +2004,8 @@ void DesignerWindow::buildUi() {
 
     // ---- canvas ----
     canvas_ = new DesignerCanvas(&doc_);
-    canvas_->selectionChanged.connect(this, this, &DesignerWindow::onSelectionChanged);
-    canvas_->documentModified.connect(this, this, &DesignerWindow::onDocumentModified);
+    QObject::connect(canvas_, canvas_->selectionChanged, this, &DesignerWindow::onSelectionChanged);
+    QObject::connect(canvas_, canvas_->documentModified, this, &DesignerWindow::onDocumentModified);
     canvas_->widgetActivated.connect(canvas_, this, &DesignerWindow::onWidgetActivated);
 
     // ---- right: object tree + properties ----
@@ -2047,7 +2047,7 @@ void DesignerWindow::buildUi() {
     objectMenu_->triggeredAction.connect(objectMenu_, objectRelay_, &MenuRelay::onTriggered);
 
     properties_ = new PropertyEditor();
-    properties_->propertyChanged.connect(this, this, &DesignerWindow::onPropertyChanged);
+    QObject::connect(properties_, properties_->propertyChanged, this, &DesignerWindow::onPropertyChanged);
     right->addWidget(tree_);
     right->addWidget(properties_);
     right->setSizes(QList<int>() << 220 << 420);

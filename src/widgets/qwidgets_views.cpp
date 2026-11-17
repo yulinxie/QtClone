@@ -1,4 +1,4 @@
-// QtClone - qwidgets_views.cpp : list, tree and table widgets.
+﻿// QtClone - qwidgets_views.cpp : list, tree and table widgets.
 #include <qtc/QtWidgets.h>
 #include <qtc/QStyle.h>
 #include "qwidget_p.h"
@@ -74,7 +74,7 @@ QListWidget::QListWidget(QWidget* parent)
     setFocusPolicy(Qt::StrongFocus);
     vbar_ = new QScrollBar(Qt::Vertical, this);
     vbar_->hide();
-    vbar_->valueChanged.connect(this, this, &QListWidget::updateScrollBars);
+    QObject::connect(vbar_, vbar_->valueChanged, this, &QListWidget::updateScrollBars);
 }
 
 QListWidget::~QListWidget() {}
@@ -389,7 +389,7 @@ QTreeWidget::QTreeWidget(QWidget* parent)
     setFocusPolicy(Qt::StrongFocus);
     vbar_ = new QScrollBar(Qt::Vertical, this);
     vbar_->hide();
-    vbar_->valueChanged.connect(this, this, &QTreeWidget::updateScrollBars);
+    QObject::connect(vbar_, vbar_->valueChanged, this, &QTreeWidget::updateScrollBars);
 }
 
 QTreeWidget::~QTreeWidget() { clear(); }
@@ -810,8 +810,8 @@ QTableWidget::QTableWidget(QWidget* parent)
     vbar_->hide();
     hbar_ = new QScrollBar(Qt::Horizontal, this);
     hbar_->hide();
-    vbar_->valueChanged.connect(this, this, &QTableWidget::updateScrollBars);
-    hbar_->valueChanged.connect(this, this, &QTableWidget::updateScrollBars);
+    QObject::connect(vbar_, vbar_->valueChanged, this, &QTableWidget::updateScrollBars);
+    QObject::connect(hbar_, hbar_->valueChanged, this, &QTableWidget::updateScrollBars);
 }
 
 QTableWidget::QTableWidget(int rows, int columns, QWidget* parent)
@@ -824,8 +824,8 @@ QTableWidget::QTableWidget(int rows, int columns, QWidget* parent)
     vbar_->hide();
     hbar_ = new QScrollBar(Qt::Horizontal, this);
     hbar_->hide();
-    vbar_->valueChanged.connect(this, this, &QTableWidget::updateScrollBars);
-    hbar_->valueChanged.connect(this, this, &QTableWidget::updateScrollBars);
+    QObject::connect(vbar_, vbar_->valueChanged, this, &QTableWidget::updateScrollBars);
+    QObject::connect(hbar_, hbar_->valueChanged, this, &QTableWidget::updateScrollBars);
     setRowCount(rows);
     setColumnCount(columns);
 }

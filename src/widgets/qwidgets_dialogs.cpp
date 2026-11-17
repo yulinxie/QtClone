@@ -1,4 +1,4 @@
-// QtClone - qwidgets_dialogs.cpp : dialogs, message boxes, native pickers, tool tips.
+﻿// QtClone - qwidgets_dialogs.cpp : dialogs, message boxes, native pickers, tool tips.
 #include <qtc/QtWidgets.h>
 #include <qtc/QStyle.h>
 #include "qwidget_p.h"
@@ -38,6 +38,13 @@ int QDialog::exec() {
     }
     setResult(0);
     show();
+    // Centre over the owner: a dialog that pops up at (0,0) far from the
+    // window the user was looking at reads as "nothing happened".
+    if (owner) {
+        QPoint origin = owner->mapToGlobal(QPoint(0, 0));
+        move(origin.x() + (owner->width() - width()) / 2,
+             origin.y() + (owner->height() - height()) / 2);
+    }
     activateWindow();
     while (isVisible()) {
         MSG msg;
@@ -157,7 +164,7 @@ void QMessageBox::addButton(const QString& text, int role) {
     b->show();
     buttonWidgets_.append(b);
     buttonValues_.append(role);
-    b->clicked.connect(this, this, &QMessageBox::onButtonClicked);
+    QObject::connect(b, b->clicked, this, &QMessageBox::onButtonClicked);
 }
 
 void QMessageBox::layoutContent() {
@@ -183,15 +190,16 @@ void QMessageBox::layoutContent() {
             b->setDefault(true);
         b->show();
         int value = entries[i].flag;
-        b->clicked.connect(this, this, &QMessageBox::onButtonClicked);
+        QObject::connect(b, b->clicked, this, &QMessageBox::onButtonClicked);
         buttonWidgets_.append(b);
         buttonValues_.append(value);
     }
     QFontMetrics fm(font());
     int textW = qMax(fm.width(text_), fm.width(informative_));
-    int wantW = qMax(300, textW + 140);
-    int wantH = 130 + (informative_.isEmpty() ? 0 : fm.height() * 2);
-    if (width() < wantW || height() < wantH) resize(wantW, wantH);
+    int buttonsW = buttonWidgets_.count() * 84 + (buttonWidgets_.count() - 1) * 8 + 40;
+    int wantW = qMax(qMax(300, buttonsW), textW + 140);
+    int wantH = qMax(160, 130 + (informative_.isEmpty() ? 0 : fm.height() * 2));
+    resize(wantW, wantH);
     update();
 }
 
@@ -516,8 +524,8 @@ public:
         ok_ = new QPushButton(L"OK", this);
         cancel_ = new QPushButton(L"Cancel", this);
         ok_->setDefault(true);
-        ok_->clicked.connect(this, this, &QSimpleInputDialog::onOk);
-        cancel_->clicked.connect(this, this, &QSimpleInputDialog::onCancel);
+        QObject::connect(ok_, ok_->clicked, this, &QSimpleInputDialog::onOk);
+        QObject::connect(cancel_, cancel_->clicked, this, &QSimpleInputDialog::onCancel);
     }
     void addEdit(const QString& text) {
         edit_ = new QLineEdit(text, this);
@@ -650,7 +658,7 @@ public:
         raise();
         QTimer* timer = new QTimer(this);
         timer->setSingleShot(true);
-        timer->timeout.connect(this, this, &QToolTipWindow::hideTip);
+        QObject::connect(timer, timer->timeout, this, &QToolTipWindow::hideTip);
         timer->start(6000);
     }
     void hideTip() { hide(); }

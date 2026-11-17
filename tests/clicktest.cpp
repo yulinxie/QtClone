@@ -214,6 +214,28 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 20; ++i) QApplication::processEvents();
     check(window.buttonClicks() == 2, "second click still works");
 
+    // 5. QMessageBox: pressing a standard button must close the box. This is
+    //    the regression behind "the exit confirmation dialog ignores clicks".
+    QMessageBox box(QMessageBox::Question, L"Q", L"close me",
+                    QMessageBox::Yes | QMessageBox::No, &window);
+    box.show();
+    for (int i = 0; i < 20; ++i) QApplication::processEvents();
+    HWND boxHwnd = (HWND)box.winId();
+    QWidgetList kids = box.childrenWidgets();
+    QWidget* standard = 0;
+    for (int i = 0; i < kids.count(); ++i) {
+        if (kids[i]->width() == 84 && kids[i]->height() == 30) { standard = kids[i]; break; }
+    }
+    check(boxHwnd != 0 && standard != 0, "message box has a standard button");
+    if (boxHwnd && standard) {
+        QPoint hit = standard->mapTo(&box, QPoint(standard->width() / 2, standard->height() / 2));
+        LPARAM pt = MAKELPARAM(hit.x(), hit.y());
+        SendMessageW(boxHwnd, WM_LBUTTONDOWN, MK_LBUTTON, pt);
+        SendMessageW(boxHwnd, WM_LBUTTONUP, 0, pt);
+        for (int i = 0; i < 20; ++i) QApplication::processEvents();
+        check(!box.isVisible(), "message box closed after pressing its button");
+    }
+
     printf("clicktest: %s (%d failures)\n", failures ? "FAILED" : "PASSED", failures);
     return failures ? 1 : 0;
 }

@@ -232,6 +232,32 @@ void QApplication::setStyle(QStyle* style) {
     qtcRepaintAll();
 }
 
+QString QApplication::buildInfo() {
+    static QString cached;
+    if (!cached.isEmpty()) return cached;
+    wchar_t path[MAX_PATH] = {0};
+    if (GetModuleFileNameW(NULL, path, MAX_PATH) == 0) return QString(L"build ?");
+    HANDLE h = CreateFileW(path, GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE) return QString(L"build ?");
+    FILETIME created, accessed, written;
+    QString result = QString(L"build ?");
+    if (GetFileTime(h, &created, &accessed, &written)) {
+        FILETIME local;
+        FileTimeToLocalFileTime(&written, &local);
+        SYSTEMTIME st;
+        FileTimeToSystemTime(&local, &st);
+        wchar_t buffer[64];
+        swprintf(buffer, 64, L"build %04d-%02d-%02d %02d:%02d",
+                 (int)st.wYear, (int)st.wMonth, (int)st.wDay, (int)st.wHour, (int)st.wMinute);
+        result = QString(buffer);
+    }
+    CloseHandle(h);
+    cached = result;
+    return cached;
+}
+
 QString QApplication::styleSheet() { return app().styleSheet; }
 
 void QApplication::setStyleSheet(const QString& sheet) {

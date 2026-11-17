@@ -19,6 +19,7 @@ GUID = {
     'wf_form': '{7A1F3C10-0005-4E8B-9C11-000000000005}',
     'idademo': '{7A1F3C10-0006-4E8B-9C11-000000000006}',
     'wechat': '{7A1F3C10-0007-4E8B-9C11-000000000007}',
+    'wf_clicktest': '{7A1F3C10-0008-4E8B-9C11-000000000008}',
 }
 
 LIBS = ('user32.lib;gdi32.lib;gdiplus.lib;comctl32.lib;comdlg32.lib;shell32.lib;'
@@ -168,6 +169,10 @@ def main():
     projects['wechat'] = vcxproj('wechat', 'Application',
                                   ['examples\\wechat\\wechat_demo.cpp'],
                                   link_extra=lib_extra, project_refs=['qtc.vcxproj'])
+    projects['wf_clicktest'] = vcxproj('wf_clicktest', 'Application',
+                                       ['tests\\clicktest.cpp'],
+                                       subsystem='Console', entry='',
+                                       link_extra=lib_extra, project_refs=['qtc.vcxproj'])
     projects['wf_form'] = vcxproj('wf_form', 'Application',
                                   ['examples\\form\\main.cpp'],
                                   extra_items=custom_build,

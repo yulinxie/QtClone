@@ -972,7 +972,7 @@ IdaWindow::IdaWindow() : QMainWindow(0, Qt::Window), ribbon_(0), functionTree_(0
                          navBand_(0), pseudo_(0), graph_(0), hexView_(0), xrefs_(0), calls_(0),
                          output_(0), statusLeft_(0), statusRight_(0), statusBar_(0),
                          pathLabel_(0), currentFunction_(0) {
-    setWindowTitle(L"IDA Pro 9 - crackme.exe  [QtClone demo]");
+    setWindowTitle(L"IDA Pro 9 - crackme.exe  [QtClone demo  " + QApplication::buildInfo() + L"]");
     resize(1440, 900);
     buildData();
     buildUi();

@@ -863,7 +863,7 @@ private:
 };
 
 WeChatWindow::WeChatWindow() : QWidget(0, Qt::Window), current_(1) {
-    setWindowTitle(L"微信");
+    setWindowTitle(L"微信  [" + QApplication::buildInfo() + L"]");
     resize(1000, 700);
     buildChats(&chats_);
 

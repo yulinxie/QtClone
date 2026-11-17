@@ -267,6 +267,7 @@ button->setStyleSheet(
 ## 10. 测试
 
 ```bat
+out\wf_clicktest.exe
 out\wf_smoke.exe            :: 40+ 项断言：字符串/变体/XML/工厂/布局/QSS/主题/uic
 out\wfdesigner.exe --selftest  :: 设计器：添加控件、序列化、撤销/重做、代码生成
 ```

@@ -2480,7 +2480,8 @@ void DesignerWindow::onLower() { canvas_->lowerSelected(); }
 
 void DesignerWindow::updateWindowTitle() {
     QString name = doc_.filePath().isEmpty() ? QString(L"\u672a\u547d\u540d") : doc_.filePath();
-    setWindowTitle(L"QtClone Designer - " + name + (doc_.modified() ? L" *" : L""));
+    setWindowTitle(L"QtClone Designer - " + name + (doc_.modified() ? L" *" : L"") +
+                   L"  [" + QApplication::buildInfo() + L"]");
 }
 
 void DesignerWindow::closeEvent(QCloseEvent* event) {

@@ -7,7 +7,7 @@
 class GalleryWindow : public QMainWindow {
 public:
     GalleryWindow() {
-        setWindowTitle(L"QtClone Widget Gallery");
+        setWindowTitle(L"QtClone Widget Gallery  [" + QApplication::buildInfo() + L"]");
         resize(980, 660);
 
         buildMenus();

@@ -358,6 +358,7 @@ public:
     static void setThemeMode(QTheme::Mode mode);
     static bool isDarkTheme();
 
+    static QString buildInfo();
     static QClipboard* clipboard();
     static int doubleClickInterval();
     static int keyboardRepeatRate();

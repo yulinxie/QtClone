@@ -139,14 +139,16 @@ namespace {
 struct PaintTarget {
     void* graphics;
     QPoint origin;
+    QRect clip;      // effective clip in the target widget's local coordinates
 };
 std::vector<PaintTarget>& paintTargets() { static std::vector<PaintTarget> v; return v; }
 } // namespace
 
-void qtcPushPaintTarget(void* graphics, const QPoint& origin) {
+void qtcPushPaintTarget(void* graphics, const QPoint& origin, const QRect& clip) {
     PaintTarget t;
     t.graphics = graphics;
     t.origin = origin;
+    t.clip = clip;
     paintTargets().push_back(t);
 }
 
@@ -154,11 +156,12 @@ void qtcPopPaintTarget() {
     if (!paintTargets().empty()) paintTargets().pop_back();
 }
 
-bool qtcCurrentPaintTarget(void** graphics, QPoint* origin) {
+bool qtcCurrentPaintTarget(void** graphics, QPoint* origin, QRect* clip) {
     if (paintTargets().empty()) return false;
     const PaintTarget& t = paintTargets().back();
     if (graphics) *graphics = t.graphics;
     if (origin) *origin = t.origin;
+    if (clip) *clip = t.clip;
     return t.graphics != 0;
 }
 
@@ -166,13 +169,17 @@ QPainter::QPainter(QWidget* widget) : d_(new QPainterPrivate()) {
     if (!widget) return;
     void* graphics = 0;
     QPoint origin(0, 0);
-    if (qtcCurrentPaintTarget(&graphics, &origin)) {
+    QRect clip;
+    if (qtcCurrentPaintTarget(&graphics, &origin, &clip)) {
         d_->g = (Graphics*)graphics;
         d_->ownsGraphics = false;
         d_->savedState = d_->g->Save();
         d_->tx = origin.x();
         d_->ty = origin.y();
-        d_->clip = widget->rect();
+        // Inherit the clip the parent render pass was given. Using only
+        // widget->rect() here lets a widget paint outside its parent (a
+        // scrolled form would draw over the menu bar and toolbar).
+        d_->clip = clip;
         d_->clipping = true;
         d_->needSync = true;
         d_->active = true;

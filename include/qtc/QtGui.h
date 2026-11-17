@@ -1,4 +1,4 @@
-// QtClone - QtGui.h : painting, colors, fonts, bitmaps.
+﻿// QtClone - QtGui.h : painting, colors, fonts, bitmaps.
 #ifndef QTC_QTGUI_H
 #define QTC_QTGUI_H
 
@@ -431,7 +431,7 @@ QPixmap qtcPixmapFromData(QBitmapData* data);
 
 // Per-thread paint target used by QPainter(QWidget*) so that nested widget
 // painting shares the Graphics of the painter currently rendering the tree.
-void qtcPushPaintTarget(void* graphics, const QPoint& origin);
+void qtcPushPaintTarget(void* graphics, const QPoint& origin, const QRect& clip);
 void qtcPopPaintTarget();
 bool qtcCurrentPaintTarget(void** graphics, QPoint* origin);
 

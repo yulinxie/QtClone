@@ -374,8 +374,13 @@ void QWidgetWindow::handleMouse(QEvent::Type type, const QPoint& clientPos,
             lstrcatW(tmpPath, L"qtclone-clicks.log");
             FILE* log = _wfopen(tmpPath, L"a");
             if (log) {
-                fprintf(log, "press %d,%d target=%s\n", clientPos.x(), clientPos.y(),
-                        debugTarget.toUtf8().c_str());
+                fprintf(log, "press %d,%d target=%s name=%s geom=%d,%d %dx%d parent=%s\n",
+                        clientPos.x(), clientPos.y(), debugTarget.toUtf8().c_str(),
+                        target ? target->objectName().toUtf8().c_str() : "",
+                        target ? target->x() : -1, target ? target->y() : -1,
+                        target ? target->width() : -1, target ? target->height() : -1,
+                        target && target->parentWidget()
+                            ? target->parentWidget()->className() : "");
                 fclose(log);
             }
             updateAll();

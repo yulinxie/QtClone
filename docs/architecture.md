@@ -243,3 +243,18 @@ setGeometry(QRect(pos, size()));
 
 `clicktest` 里新增了回归用例：`popup()` 之后断言菜单几何位置与请求的全局坐标一致，
 并且下沿在菜单栏之下。改回旧写法时该用例失败。
+
+
+## 子控件裁剪（嵌套 painter）
+
+`renderInternal` 给每个控件设置裁剪后，会在 `qtcPushPaintTarget` 里把
+**当前有效裁剪（控件局部坐标）** 一并压栈。控件在 `paintEvent` 里新建
+`QPainter p(this)` 时继承这个裁剪，而不是只用自己的 `rect()`。
+
+如果不继承：一个被移动到负坐标的子控件（例如滚动画布里的大窗体）会以
+自己的矩形为界绘制，直接盖到菜单栏和工具栏上——表现为“滚动后顶部变白”。
+修复前 `QPainter(QWidget*)` 用 `widget->rect()` 作为裁剪，父级裁剪全部丢失。
+
+`QTCLONE_CLICK_DEBUG=1` 之外还有 `QTC_PAINT_DEBUG=1`，会把每次
+`renderInternal` 的类名、绝对原点、尺寸与裁剪写进 `out/paint.log`，
+排查“谁画到了别处”时很有用。

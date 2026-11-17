@@ -858,7 +858,23 @@ void QWidget::renderInternal(QPainter* painter, const QPoint& origin, const QRec
     QRect localClip = clip.translated(-origin.x(), -origin.y()).intersected(rect());
     painter->setClipRect(localClip);
     QPoint paintOrigin = painter->paintOrigin();
-    qtcPushPaintTarget(painter->graphics(), paintOrigin);
+    qtcPushPaintTarget(painter->graphics(), paintOrigin, localClip);
+    {
+        static int paintDebug = -1;
+        if (paintDebug < 0) {
+            wchar_t v[8] = {0};
+            paintDebug = GetEnvironmentVariableW(L"QTC_PAINT_DEBUG", v, 8) > 0 ? 1 : 0;
+        }
+        if (paintDebug) {
+            FILE* f = fopen("D:\\AI\\QtClone\\out\\paint.log", "a");
+            if (f) {
+                fprintf(f, "paint %s '%s' origin=%d,%d rect=%dx%d clip=%d,%d %dx%d\n",
+                        className(), objectName().toUtf8().c_str(), origin.x(), origin.y(),
+                        width(), height(), clip.x(), clip.y(), clip.width(), clip.height());
+                fclose(f);
+            }
+        }
+    }
     paintSelf(painter);
     // Children must never paint outside their parent widget.
     QRect childClip = clip.translated(-origin.x(), -origin.y()).intersected(rect());

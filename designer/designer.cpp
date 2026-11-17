@@ -500,8 +500,8 @@ private:
 
 DesignerCanvas::DesignerCanvas(DesignerDocument* doc)
     : QWidget(0), doc_(doc), form_(0), selected_(0), hover_(0), overlay_(0), contextMenu_(0),
-      menuRelay_(0), hoverHandle_(-1),
-      grid_(true), mode_(Idle), handle_(-1) {
+      menuRelay_(0), viewport_(0), scrollX_(0), scrollY_(0), maxScrollX_(0), maxScrollY_(0),
+      hoverHandle_(-1), grid_(true), mode_(Idle), handle_(-1) {
     bandRect_ = QRect();
     bandAdditive_ = false;
     setFocusPolicy(Qt::StrongFocus);

@@ -408,6 +408,16 @@ QMouseEvent ev(type, localPos, mapToGlobal(clientPos), button, buttons, mods);
             if (GetCapture() == hwnd) ReleaseCapture();
         }
     }
+
+    // A click always leaves the window fully repainted. Some widgets were
+    // parented before their window existed (or sit behind a clipped viewport),
+    // and their update() can miss; without this the state changes but the
+    // user sees no response.
+    if ((type == QEvent::MouseButtonPress || type == QEvent::MouseButtonRelease) &&
+        hwnd && IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
+        updateAll();
+        UpdateWindow(hwnd);
+    }
 }
 
 void QWidgetWindow::handleWheel(const QPoint& clientPos, int delta, Qt::MouseButtons buttons,

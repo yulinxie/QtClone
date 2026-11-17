@@ -1,4 +1,4 @@
-// QtClone - uicgen.cpp : generates C++ setup code from a .ui document.
+﻿// QtClone - uicgen.cpp : generates C++ setup code from a .ui document.
 #include "uicgen.h"
 #include <qtc/QXml.h>
 #include <qtc/QRect.h>
@@ -11,7 +11,15 @@ struct WidgetInfo {
     QString name;
     QString parentName;
     int x, y, w, h;
+    bool inLayout;
     QList<QXmlNode*> properties;
+};
+
+struct LayoutInfo {
+    QString name;
+    QString className;
+    QString container;
+    QList<QString> children;
 };
 
 QString cppString(const QString& text) {
@@ -132,12 +140,14 @@ QString propertyValueExpr(const QString& typeName, QXmlNode* valueNode, const QS
     return QString();
 }
 
-void collectWidgets(QXmlNode* widgetNode, const QString& parentName, QList<WidgetInfo>* out) {
+void collectWidgets(QXmlNode* widgetNode, const QString& parentName, bool inLayout,
+                    QList<WidgetInfo>* out, QList<LayoutInfo>* layouts) {
     if (!widgetNode) return;
     WidgetInfo info;
     info.className = widgetNode->attribute(L"class");
     info.name = widgetNode->attribute(L"name");
     info.parentName = parentName;
+    info.inLayout = inLayout;
     info.x = info.y = 0;
     info.w = 100;
     info.h = 30;
@@ -157,9 +167,27 @@ void collectWidgets(QXmlNode* widgetNode, const QString& parentName, QList<Widge
     }
     out->append(info);
 
+    QList<QXmlNode*> layoutNodes = widgetNode->childrenNamed(L"layout");
+    if (layoutNodes.count() > 0 && layouts) {
+        LayoutInfo li;
+        li.className = layoutNodes[0]->attribute(L"class");
+        li.container = info.name;
+        li.name = layoutNodes[0]->attribute(L"name");
+        if (li.name.isEmpty()) li.name = info.name + L"Layout";
+        QList<QXmlNode*> items = layoutNodes[0]->childrenNamed(L"item");
+        for (int i = 0; i < items.count(); ++i) {
+            QList<QXmlNode*> ws = items[i]->childrenNamed(L"widget");
+            for (int k = 0; k < ws.count(); ++k) {
+                li.children.append(ws[k]->attribute(L"name"));
+                collectWidgets(ws[k], info.name, true, out, layouts);
+            }
+        }
+        layouts->append(li);
+    }
+
     QList<QXmlNode*> children = widgetNode->childrenNamed(L"widget");
     for (int i = 0; i < children.count(); ++i)
-        collectWidgets(children[i], info.name, out);
+        collectWidgets(children[i], info.name, false, out, layouts);
 }
 
 } // namespace
@@ -186,7 +214,8 @@ QString uicGenerateHeader(const QString& uiXml, const QString& className, QStrin
         return QString();
     }
     QList<WidgetInfo> widgets;
-    collectWidgets(topWidget, QString(), &widgets);
+    QList<LayoutInfo> layouts;
+    collectWidgets(topWidget, QString(), false, &widgets, &layouts);
 
     QString includeGuard = L"UI_" + formClass.toUpper() + L"_H";
     QString out;
@@ -207,8 +236,19 @@ QString uicGenerateHeader(const QString& uiXml, const QString& className, QStrin
         QString parentExpr = w.parentName.isEmpty() ? formClass : w.parentName;
         out += L"\n        " + w.name + L" = new " + w.className + L"(" + parentExpr + L");\n";
         out += L"        " + w.name + L"->setObjectName(QString::fromUtf8(\"" + w.name + L"\"));\n";
-        out += L"        " + w.name + L"->setGeometry(QRect(" + intText(w.x) + L", " + intText(w.y) + L", " +
-               intText(w.w) + L", " + intText(w.h) + L"));\n";
+        if (!w.inLayout) {
+            out += L"        " + w.name + L"->setGeometry(QRect(" + intText(w.x) + L", " + intText(w.y) + L", " +
+                   intText(w.w) + L", " + intText(w.h) + L"));\n";
+        }
+    }
+
+    // layouts are created after their children exist
+    for (int i = 0; i < layouts.count(); ++i) {
+        const LayoutInfo& l = layouts[i];
+        QString container = l.container.isEmpty() ? formClass : l.container;
+        out += L"\n        " + l.className + L"* " + l.name + L" = new " + l.className + L"(" + container + L");\n";
+        for (int c = 0; c < l.children.count(); ++c)
+            out += L"        " + l.name + L"->addWidget(" + l.children[c] + L");\n";
     }
 
     // properties (strings live in retranslateUi)

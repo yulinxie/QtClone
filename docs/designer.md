@@ -36,12 +36,23 @@ qtcuic.exe Form1.ui                 :: 输出到同目录 ui_form1.h（默认）
 | 对象树 | 两列（对象 / 类型），层级展示；单击选中并同步画布（按名称查找，支持嵌套）；双击重命名；右键重命名、删除、置于顶层/底层 |
 | 属性网格 | 顶部过滤框；单击文本/数字单元格就地编辑（Enter 提交、Esc 取消）；布尔单击切换；枚举下拉；颜色/字体调系统对话框；几何用 `x,y,w,h` 文本双击编辑 |
 | Tab 顺序 | 编辑菜单 → “Tab 顺序…”，列表顺序即焦点顺序；选中后上移/下移，确定后写回控件顺序（影响对象树与运行时 Tab 焦点链） |
+| 布局 | 编辑菜单 → “水平布局”（`Ctrl+1`）、“垂直布局”（`Ctrl+2`）、“打破布局”（`Ctrl+0`）。未选中容器时作用于整个窗体；选中一个容器时作用于该容器内的子控件。布局按当前视觉顺序排列控件，布局内的控件不能再自由拖动/缩放（先“打破布局”），窗体缩放时控件自动重排 |
 | 状态栏 | 显示当前选中与文件路径 |
 
 快捷键：`Ctrl+N` 新建、`Ctrl+O` 打开、`Ctrl+S` 保存、`Ctrl+Shift+S` 另存、
 `Ctrl+Z/Y` 撤销/重做、`Ctrl+D` 复制、`Delete` 删除、`F5` 预览、`F7` 生成代码。
 
 撤销/重做以 `.ui` 快照实现（最多 200 步），任何属性或几何修改都会入栈。
+
+布局会写进 `.ui`（`<layout class="QHBoxLayout">` + `<item><widget>`），
+重新打开文件、预览、`qtcuic` 生成代码都会保留；打破布局后控件保留当前几何，
+回到绝对定位。生成代码示例：
+
+```cpp
+QPushButton* btnA = new QPushButton(LayoutForm);
+QHBoxLayout* horizontalLayout = new QHBoxLayout(LayoutForm);
+horizontalLayout->addWidget(btnA);
+```
 
 ---
 

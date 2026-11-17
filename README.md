@@ -24,7 +24,7 @@ QtClone 是一个可实际使用的桌面 UI 开发包。它复刻的是 **Qt Wi
 | 布局 | `QHBoxLayout`/`QVBoxLayout`/`QGridLayout`/`QFormLayout`/`QStackedLayout`，尺寸策略、拉伸因子 |
 | 样式 | QSS 子集（类型/#id/伪状态/后代选择器；背景、边框、圆角、内边距、字体、颜色、最小/最大尺寸） |
 | 主题 | **亮色 / 暗色（近黑）/ 跟随系统**，运行时切换，监听 `WM_SETTINGCHANGE` 自动跟随 |
-| 设计器 | 工具箱、画布（选中/拖动/8 手柄缩放/网格吸附）、属性网格、对象树、撤销/重做、F5 预览、F7 生成代码 |
+| 设计器 | 工具箱、画布（选中/拖动/8 手柄缩放/网格吸附/滚动）、属性网格、对象树、撤销/重做、水平/垂直布局与打破布局（`.ui` 布局往返、生成布局代码）、Tab 顺序、F5 预览、F7 生成代码 |
 | 代码生成 | `qtcuic.exe`：`.ui` → `ui_<form>.h`（`Ui_Form` + `setupUi()` + `retranslateUi()`） |
 | 工程集成 | VS2010 解决方案 + `.vcxproj`，`.ui` 由 CustomBuild 步骤自动编译（无需 moc） |
 | 测试 | `wf_smoke.exe`（核心/控件/布局/QSS/XML/uic）+ 设计器 `--selftest` |

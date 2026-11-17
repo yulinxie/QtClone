@@ -216,13 +216,15 @@ QVariant variantFromXml(const QString& typeName, QXmlNode* prop) {
     return QVariant();
 }
 
-QString captureWidgetXml(QWidget* widget) {
+QString captureWidgetXml(QWidget* widget, bool withGeometry = true) {
     QXmlNode node(L"widget");
     node.setAttribute(L"class", QString(widget->className()));
     node.setAttribute(L"name", widget->objectName());
-    QXmlNode* geometry = node.appendChild(L"property");
-    geometry->setAttribute(L"name", L"geometry");
-    writeRect(geometry, "rect", widget->geometry());
+    if (withGeometry) {
+        QXmlNode* geometry = node.appendChild(L"property");
+        geometry->setAttribute(L"name", L"geometry");
+        writeRect(geometry, "rect", widget->geometry());
+    }
     const QMetaObject* mo = widget->metaObject();
     for (int i = 0; i < mo->propertyCount(); ++i) {
         QMetaProperty prop = mo->property(i);
@@ -235,6 +237,33 @@ QString captureWidgetXml(QWidget* widget) {
         writePropertyNode(&node, QString::fromUtf8(name), value);
     }
     return node.toXml(0);
+}
+
+QString layoutClassOf(QLayout* layout) {
+    if (dynamic_cast<QHBoxLayout*>(layout)) return QString(L"QHBoxLayout");
+    if (dynamic_cast<QVBoxLayout*>(layout)) return QString(L"QVBoxLayout");
+    return QString();
+}
+
+QWidget* buildWidgetTree(QXmlNode* node, QWidget* parent);
+
+QLayout* buildLayoutFromXml(QWidget* container, QXmlNode* lnode) {
+    QString cls = lnode->attribute(L"class");
+    QLayout* layout = 0;
+    if (cls == L"QHBoxLayout") layout = new QHBoxLayout();
+    else if (cls == L"QVBoxLayout") layout = new QVBoxLayout();
+    if (!layout) return 0;
+    container->setLayout(layout);
+    QList<QXmlNode*> items = lnode->childrenNamed(L"item");
+    for (int i = 0; i < items.count(); ++i) {
+        QList<QXmlNode*> ws = items[i]->childrenNamed(L"widget");
+        for (int k = 0; k < ws.count(); ++k) {
+            QWidget* child = buildWidgetTree(ws[k], container);
+            if (child) layout->addWidget(child);
+        }
+    }
+    layout->activate();
+    return layout;
 }
 
 void rebuildWidgetFromXml(QWidget* widget, QXmlNode* node) {
@@ -269,7 +298,40 @@ QWidget* buildWidgetTree(QXmlNode* node, QWidget* parent) {
     widget->show();
     QList<QXmlNode*> children = node->childrenNamed(L"widget");
     for (int i = 0; i < children.count(); ++i) buildWidgetTree(children[i], widget);
+
+    QList<QXmlNode*> layoutNodes = node->childrenNamed(L"layout");
+    if (layoutNodes.count() > 0) buildLayoutFromXml(widget, layoutNodes[0]);
     return widget;
+}
+
+void appendChildrenXml(QWidget* container, QXmlNode* parentNode) {
+    QLayout* layout = container->layout();
+    if (layout) {
+        QString cls = layoutClassOf(layout);
+        if (!cls.isEmpty()) {
+            QXmlNode* lnode = parentNode->appendChild(L"layout");
+            lnode->setAttribute(L"class", cls);
+            lnode->setAttribute(L"name", container->objectName() + L"Layout");
+            for (int i = 0; i < layout->count(); ++i) {
+                QLayoutItem* item = layout->itemAt(i);
+                QWidget* child = item ? item->widget() : 0;
+                if (!child) continue;
+                QXmlNode* wnode = QXmlNode::parse(captureWidgetXml(child, false), 0);
+                if (!wnode) continue;
+                QXmlNode* itemNode = lnode->appendChild(L"item");
+                itemNode->appendChild(wnode);
+                appendChildrenXml(child, wnode);
+            }
+            return;
+        }
+    }
+    QList<QWidget*> children = container->childrenWidgets();
+    for (int i = 0; i < children.count(); ++i) {
+        QXmlNode* wnode = QXmlNode::parse(captureWidgetXml(children[i]), 0);
+        if (!wnode) continue;
+        parentNode->appendChild(wnode);
+        appendChildrenXml(children[i], wnode);
+    }
 }
 
 } // namespace
@@ -426,6 +488,9 @@ public:
     void distributeSelection(bool horizontal);
     void scrollByPage(int pages);
     void scrollHome();
+    void applyLayout(int kind);   // 0 = horizontal, 1 = vertical
+    void breakLayout();
+    bool isLayoutChild(QWidget* widget) const;
     enum AlignMode { AlignLeft, AlignRight, AlignTop, AlignBottom, AlignCenterH, AlignCenterV };
     void centerSelected(bool horizontal) { centerSelection(horizontal); }
     void raiseSelected();
@@ -436,6 +501,7 @@ public:
     void paintAdornments(QPainter& p);
     void syncScroll();
     void scrollTo(int x, int y);
+    QWidget* layoutTarget() const;
     void ensureVisible(QWidget* widget);
 
     ~DesignerCanvas();
@@ -562,6 +628,7 @@ void SelectionOverlay::paintEvent(QPaintEvent*) {
 }
 
 void DesignerCanvas::rebuild() {
+    if (form_->layout()) form_->setLayout(0);
     QList<QWidget*> children = form_->childrenWidgets();
     for (int i = 0; i < children.count(); ++i) {
         children[i]->setParentWidget(0);
@@ -588,6 +655,8 @@ void DesignerCanvas::rebuild() {
     }
     QList<QXmlNode*> childNodes = top->childrenNamed(L"widget");
     for (int i = 0; i < childNodes.count(); ++i) buildWidgetTree(childNodes[i], form_);
+    QList<QXmlNode*> topLayouts = top->childrenNamed(L"layout");
+    if (topLayouts.count() > 0) buildLayoutFromXml(form_, topLayouts[0]);
     delete root;
     syncScroll();
     if (overlay_) overlay_->raise();
@@ -736,18 +805,7 @@ void DesignerCanvas::captureToDocument() {
     writeRect(geometry, "rect", QRect(0, 0, form_->width(), form_->height()));
     writePropertyNode(top, L"windowTitle", QVariant(form_->windowTitle()));
 
-    QList<QWidget*> children = form_->childrenWidgets();
-    for (int i = 0; i < children.count(); ++i) {
-        QXmlNode* child = QXmlNode::parse(captureWidgetXml(children[i]), 0);
-        if (!child) continue;
-        // nested children are captured separately, keep the tree shallow for now
-        QList<QWidget*> grandchildren = children[i]->childrenWidgets();
-        for (int g = 0; g < grandchildren.count(); ++g) {
-            QXmlNode* gnode = QXmlNode::parse(captureWidgetXml(grandchildren[g]), 0);
-            if (gnode) child->appendChild(gnode);
-        }
-        top->appendChild(child);
-    }
+    appendChildrenXml(form_, top);
     ui.appendChild(L"connections");
     doc_->setXmlAndCaptureUndo(ui.toXml(0));
     documentModified();
@@ -1021,7 +1079,9 @@ void DesignerCanvas::mousePressEvent(QMouseEvent* event) {
     bool ctrl = (event->modifiers() & Qt::ControlModifier) != 0;
     bool shift = (event->modifiers() & Qt::ShiftModifier) != 0;
 
-    int handle = (selection_.count() == 1 && selected_) ? handleAt(event->pos()) : -1;
+    int handle = (selection_.count() == 1 && selected_ && !isLayoutChild(selected_))
+                     ? handleAt(event->pos())
+                     : -1;
     if (handle >= 0) {
         mode_ = Resizing;
         handle_ = handle;
@@ -1052,6 +1112,11 @@ void DesignerCanvas::mousePressEvent(QMouseEvent* event) {
         setSelectionList(list);
     } else if (!isSelected(hit)) {
         select(hit, true);
+    }
+
+    if (isLayoutChild(hit)) {
+        mode_ = Idle;
+        return;
     }
 
     dragWidgets_ = selection_;
@@ -1194,6 +1259,7 @@ void DesignerCanvas::keyPressEvent(QKeyEvent* event) {
     default: QWidget::keyPressEvent(event); return;
     }
     for (int i = 0; i < selection_.count(); ++i) {
+        if (isLayoutChild(selection_[i])) continue;
         QRect g = selection_[i]->geometry();
         QRect moved = g.translated(dx, dy);
         if (moved.left() < 0 || moved.top() < 0 || moved.right() >= form_->width() ||
@@ -1234,6 +1300,65 @@ void DesignerCanvas::scrollByPage(int pages) {
 
 void DesignerCanvas::scrollHome() {
     scrollTo(0, 0);
+}
+
+bool DesignerCanvas::isLayoutChild(QWidget* widget) const {
+    QWidget* parent = widget ? widget->parentWidget() : 0;
+    return parent && parent->layout() != 0;
+}
+
+QWidget* DesignerCanvas::layoutTarget() const {
+    if (selection_.count() == 1 && selection_[0] && selection_[0] != form_ &&
+        !isLayoutChild(selection_[0]) && selection_[0]->childrenWidgets().count() > 0)
+        return selection_[0];
+    return form_;
+}
+
+void DesignerCanvas::applyLayout(int kind) {
+    QWidget* container = layoutTarget();
+    if (!container) return;
+    QList<QWidget*> kids = container->childrenWidgets();
+    if (kids.isEmpty()) return;
+
+    // keep the visual order: left-to-right or top-to-bottom
+    for (int i = 0; i < kids.count(); ++i) {
+        for (int j = i + 1; j < kids.count(); ++j) {
+            QWidget* a = kids[i];
+            QWidget* b = kids[j];
+            bool swap = (kind == 0)
+                            ? (b->x() < a->x() || (b->x() == a->x() && b->y() < a->y()))
+                            : (b->y() < a->y() || (b->y() == a->y() && b->x() < a->x()));
+            if (swap) {
+                kids[i] = b;
+                kids[j] = a;
+            }
+        }
+    }
+
+    container->setLayout(0);
+    QLayout* layout = (kind == 0) ? (QLayout*)new QHBoxLayout() : (QLayout*)new QVBoxLayout();
+    container->setLayout(layout);
+    for (int i = 0; i < kids.count(); ++i) layout->addWidget(kids[i]);
+    layout->activate();
+
+    captureToDocument();
+    updateAdornments();
+    update();
+}
+
+void DesignerCanvas::breakLayout() {
+    QWidget* container = layoutTarget();
+    if (!container || !container->layout()) return;
+
+    QList<QWidget*> kids = container->childrenWidgets();
+    QList<QRect> rects;
+    for (int i = 0; i < kids.count(); ++i) rects.append(kids[i]->geometry());
+    container->setLayout(0);   // deletes the layout
+    for (int i = 0; i < kids.count(); ++i) kids[i]->setGeometry(rects[i]);
+
+    captureToDocument();
+    updateAdornments();
+    update();
 }
 
 void DesignerCanvas::ensureVisible(QWidget* widget) {
@@ -1805,6 +1930,9 @@ private:
     void onTreeDoubleClicked(QTreeWidgetItem* item, int column);
     void onFormSize();
     void onTabOrder();
+    void onLayoutHorizontal();
+    void onLayoutVertical();
+    void onBreakLayout();
     void onCenterH();
     void onCenterV();
     void onSelectAll();
@@ -1893,6 +2021,16 @@ void DesignerWindow::buildMenus() {
     QObject::connect(frontAct, frontAct->triggered, this, &DesignerWindow::onRaise);
     QAction* backAct = edit->addAction(L"置于底层");
     QObject::connect(backAct, backAct->triggered, this, &DesignerWindow::onLower);
+    edit->addSeparator();
+    QAction* hboxAct = edit->addAction(L"水平布局");
+    hboxAct->setShortcut(L"Ctrl+1");
+    QObject::connect(hboxAct, hboxAct->triggered, this, &DesignerWindow::onLayoutHorizontal);
+    QAction* vboxAct = edit->addAction(L"垂直布局");
+    vboxAct->setShortcut(L"Ctrl+2");
+    QObject::connect(vboxAct, vboxAct->triggered, this, &DesignerWindow::onLayoutVertical);
+    QAction* breakLayoutAct = edit->addAction(L"打破布局");
+    breakLayoutAct->setShortcut(L"Ctrl+0");
+    QObject::connect(breakLayoutAct, breakLayoutAct->triggered, this, &DesignerWindow::onBreakLayout);
     edit->addSeparator();
     QAction* tabOrderAct = edit->addAction(L"Tab 顺序...");
     QObject::connect(tabOrderAct, tabOrderAct->triggered, this, &DesignerWindow::onTabOrder);
@@ -2439,6 +2577,21 @@ void DesignerWindow::onTabOrder() {
     }
 }
 
+void DesignerWindow::onLayoutHorizontal() {
+    canvas_->applyLayout(0);
+    setStatus(L"水平布局已应用");
+}
+
+void DesignerWindow::onLayoutVertical() {
+    canvas_->applyLayout(1);
+    setStatus(L"垂直布局已应用");
+}
+
+void DesignerWindow::onBreakLayout() {
+    canvas_->breakLayout();
+    setStatus(L"布局已打破");
+}
+
 void DesignerWindow::onCenterH() { canvas_->centerSelected(true); }
 void DesignerWindow::onCenterV() { canvas_->centerSelected(false); }
 
@@ -2601,6 +2754,79 @@ int DesignerWindow::selfTest() {
             canvas_->deleteSelected();
             if (canvas_->form()->childrenWidgets().count() != 0) {
                 printf("FAIL: multi delete\n");
+                ++failures;
+            }
+        }
+    }
+
+    // layouts: apply, reflow on resize, serialize, reload, break
+    newDocument();
+    canvas_->select(0);
+    addWidgetByClass(L"QPushButton");
+    QWidget* lb1 = canvas_->selected();
+    if (lb1) canvas_->applyProperty(lb1, "geometry", QVariant(QRect(20, 20, 80, 30)));
+    canvas_->select(0);
+    addWidgetByClass(L"QPushButton");
+    QWidget* lb2 = canvas_->selected();
+    if (lb2) canvas_->applyProperty(lb2, "geometry", QVariant(QRect(140, 20, 80, 30)));
+    canvas_->select(0);
+    addWidgetByClass(L"QPushButton");
+    QWidget* lb3 = canvas_->selected();
+    if (lb3) canvas_->applyProperty(lb3, "geometry", QVariant(QRect(260, 20, 80, 30)));
+    canvas_->select(0);
+
+    canvas_->applyLayout(0);
+    if (!canvas_->form()->layout()) {
+        printf("FAIL: horizontal layout not applied\n");
+        ++failures;
+    }
+    if (doc_.xml().indexOf(L"<layout class=\"QHBoxLayout\"") < 0) {
+        printf("FAIL: layout not serialized\n");
+        ++failures;
+    }
+    if (lb1 && lb2 && lb3) {
+        if (!(lb1->y() == lb2->y() && lb2->y() == lb3->y())) {
+            printf("FAIL: layout did not line widgets up\n");
+            ++failures;
+        }
+        if (!(lb1->x() < lb2->x() && lb2->x() < lb3->x())) {
+            printf("FAIL: layout did not keep the visual order\n");
+            ++failures;
+        }
+        int rightBefore = lb3->geometry().right();
+        canvas_->form()->resize(canvas_->form()->width() + 120, canvas_->form()->height());
+        if (canvas_->form()->layout()) canvas_->form()->layout()->activate();
+        if (lb3->geometry().right() <= rightBefore) {
+            printf("FAIL: widgets did not follow a form resize\n");
+            ++failures;
+        }
+    }
+
+    // capture -> xml -> rebuild must preserve the layout
+    doc_.setXml(doc_.xml());
+    canvas_->rebuild();
+    if (!canvas_->form()->layout()) {
+        printf("FAIL: layout lost on reload\n");
+        ++failures;
+    } else {
+        QWidget* r1 = findWidgetByName(canvas_->form(), L"qpushbutton1");
+        QWidget* r2 = findWidgetByName(canvas_->form(), L"qpushbutton2");
+        QWidget* r3 = findWidgetByName(canvas_->form(), L"qpushbutton3");
+        if (!r1 || !r2 || !r3) {
+            printf("FAIL: widgets lost on reload\n");
+            ++failures;
+        } else if (!(r1->y() == r2->y() && r2->y() == r3->y())) {
+            printf("FAIL: reloaded layout is not horizontal\n");
+            ++failures;
+        } else {
+            QRect keep = r2->geometry();
+            canvas_->breakLayout();
+            if (canvas_->form()->layout()) {
+                printf("FAIL: layout not broken\n");
+                ++failures;
+            }
+            if (r2->geometry() != keep) {
+                printf("FAIL: breaking a layout moved the widgets\n");
                 ++failures;
             }
         }

@@ -758,7 +758,11 @@ void QWidget::adjustSize() {
 
 void QWidget::setLayout(QLayout* layout) {
     if (d_->layout == layout) return;
-    if (d_->layout) delete d_->layout;
+    // Detach before deleting: ~QLayout calls setLayout(0) on its parent, which
+    // would delete the same layout again and recurse until the stack overflows.
+    QLayout* old = d_->layout;
+    d_->layout = 0;
+    delete old;
     d_->layout = layout;
     if (layout) {
         layout->setParentWidget(this);

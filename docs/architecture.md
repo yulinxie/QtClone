@@ -112,6 +112,22 @@ QWidgetWindow::paint(dc)
 * `QGridLayout` 先按跨行列计算行高列宽，再分别对列、行做一次 `distribute()`。
 * `QFormLayout` 两列（标签/字段），行高取两者 hint 的较大值。
 
+### 设计器里的布局
+
+* 编辑菜单 → 水平布局（`Ctrl+1`）/ 垂直布局（`Ctrl+2`）/ 打破布局（`Ctrl+0`）：
+  未选中容器时作用于窗体，选中一个容器时作用于该容器。
+* 应用时按当前坐标排序（水平按 x、垂直按 y），`setLayout(0)` 丢弃旧布局后新建并 `activate()`。
+* `.ui` 使用标准 `<layout class="QHBoxLayout"><item><widget …/></item></layout>`，
+  布局内控件不写 `geometry`；加载时创建 layout 并按 item 顺序 `addWidget`。
+* 序列化从活的控件树生成：`appendChildrenXml()` 遇到 `widget->layout()` 就写 `<layout>`，
+  顺序来自 `layout->itemAt(i)`，因此保存顺序就是视觉顺序。
+* 布局内控件由布局管理，画布禁止拖动/缩放/方向键微调（先打破布局）；
+  打破布局时先记录当前几何，删除布局后原样写回，视觉不跳。
+
+修复的相关 bug：`QWidget::setLayout(0)` 直接 `delete` 旧布局时，`~QLayout` 会回调
+`parent->setLayout(0)`，陷入同一对象反复删除的递归（栈溢出）。现在先置空
+`d_->layout` 再删除，析构回调看到空指针立即返回。
+
 ---
 
 ## 7. 样式与主题
@@ -141,7 +157,7 @@ QWidgetWindow::paint(dc)
 
 | 限制 | 说明 / 规避 |
 | --- | --- |
-| 设计器仅绝对布局 | 控件使用绝对 geometry；不生成 QLayout（Qt Designer 默认布局容器） |
+| 设计器布局 | 支持水平/垂直布局与打破布局；网格/表单/栈式布局的设计器入口尚未做（框架类已有） |
 | 无 QML / Quick | 本框架有意只做 Widgets 编程模型 |
 | item-based 视图 | `QListWidget/QTreeWidget/QTableWidget` 为便捷类；无 `QAbstractItemModel` 自定义模型/委托 |
 | 无 OpenGL/图形视图 | 绘制为 GDI+ 软件光栅 |

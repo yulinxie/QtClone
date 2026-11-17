@@ -269,9 +269,13 @@ void QMenu::popup(const QPoint& globalPos) {
     updateGeometryForActions();
     aboutToShow();
     suppressRelease_ = true;
-    QPoint local = globalPos;
-    if (parentWidget()) local = parentWidget()->mapFromGlobal(globalPos);
-    setGeometry(QRect(local, size()));
+    // The menu is a top level popup window: its geometry is in screen
+    // coordinates. Mapping to the parent first would subtract the parent's
+    // client origin (title bar / menu bar offsets) and place the menu up and
+    // to the left of the item that opened it.
+    QPoint pos = globalPos;
+    if (parentWidget() && !isWindow()) pos = parentWidget()->mapFromGlobal(globalPos);
+    setGeometry(QRect(pos, size()));
     show();
     raise();
     setFocus(Qt::PopupFocusReason);

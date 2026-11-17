@@ -65,6 +65,21 @@ static unsigned long long hashWindowRegion(HWND hwnd, int x, int y, int cw, int 
 // A widget that changes its own state on click but never asks for a repaint.
 // Without the framework's "click always repaints" guarantee this stays stale,
 // which is exactly what users described as "the click did nothing".
+class TestMenuBar : public QMenuBar {
+public:
+    TestMenuBar(QWidget* parent) : QMenuBar(parent), presses_(0) {}
+    int presses() const { return presses_; }
+
+protected:
+    void mousePressEvent(QMouseEvent* event) {
+        ++presses_;
+        QMenuBar::mousePressEvent(event);
+    }
+
+private:
+    int presses_;
+};
+
 class SilentBox : public QWidget {
 public:
     explicit SilentBox(QWidget* parent) : QWidget(parent), on_(false) {}
@@ -234,6 +249,34 @@ int main(int argc, char** argv) {
         SendMessageW(boxHwnd, WM_LBUTTONUP, 0, pt);
         for (int i = 0; i < 20; ++i) QApplication::processEvents();
         check(!box.isVisible(), "message box closed after pressing its button");
+    }
+
+    // 6. QMenu is a top level popup: popup() must place it exactly at the
+    //    requested global position. Mapping through the parent first used to
+    //    shift it up/left by the window's client origin (title bar offset).
+    QWidget menuWindow(0, Qt::Window);
+    menuWindow.move(60, 80);
+    menuWindow.resize(400, 300);
+    QMenuBar bar(&menuWindow);
+    bar.setGeometry(0, 0, 400, 26);
+    QMenu* fileMenu = bar.addMenu(L"File");
+    fileMenu->addAction(L"Open");
+    menuWindow.show();
+    for (int i = 0; i < 30; ++i) QApplication::processEvents();
+
+    QPoint barOrigin = bar.mapToGlobal(QPoint(0, 0));
+    QPoint menuAt(barOrigin.x(), barOrigin.y() + bar.height());
+    fileMenu->popup(menuAt);
+    for (int i = 0; i < 10; ++i) QApplication::processEvents();
+    check(fileMenu->isVisible(), "menu popup() opened the menu");
+    if (fileMenu->isVisible()) {
+        QRect g = fileMenu->geometry();
+        check(g.left() == menuAt.x() && g.top() == menuAt.y(),
+              "menu lands exactly at the requested global position");
+        check(g.top() >= barOrigin.y() + bar.height() - 2,
+              "menu drops below the menu bar");
+        fileMenu->hide();
+        QApplication::processEvents();
     }
 
     printf("clicktest: %s (%d failures)\n", failures ? "FAILED" : "PASSED", failures);

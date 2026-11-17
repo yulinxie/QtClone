@@ -224,3 +224,22 @@ QObject::connect(button, button->clicked, this, &Box::onButtonClicked);
 
 `clicktest` 里专门有一条用例：点击 QMessageBox 的标准按钮，断言对话框会关闭；
 把 connect 改回三参数形式，这条用例立刻失败。
+
+
+## 弹出菜单坐标
+
+`QMenu` 是顶层弹出窗口（`Qt::Popup`），几何位置就是**屏幕坐标**。
+`QMenu::popup(globalPos)` 以前会先把 globalPos 映射成父控件局部坐标再 `setGeometry`，
+于是菜单被整体上移/左移了一个“客户区原点”（标题栏高度、菜单栏偏移）——
+表现为菜单弹在点击项的上方、左边错位。
+
+正确做法：窗口直接用 globalPos，只有非窗口控件才做 `mapFromGlobal`。
+
+```cpp
+QPoint pos = globalPos;
+if (parentWidget() && !isWindow()) pos = parentWidget()->mapFromGlobal(globalPos);
+setGeometry(QRect(pos, size()));
+```
+
+`clicktest` 里新增了回归用例：`popup()` 之后断言菜单几何位置与请求的全局坐标一致，
+并且下沿在菜单栏之下。改回旧写法时该用例失败。
